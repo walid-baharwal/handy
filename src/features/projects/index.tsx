@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
 import { Empty, Glyph, Modal, PageHeader, Status } from "../../components/ui";
@@ -33,92 +33,130 @@ export function ProjectsView(
           action={props.onAdd}
         />
       ) : (
-        <div className="project-grid">
-          {projects.map((project, index) => {
-            const commands = project.commandIds
-              .map((id) => props.config.commands[id])
-              .filter(Boolean);
-            const state = aggregateStatus(
-              commands.map((command) => props.runtime[command.id]?.status),
-            );
-            const canStopStack = commands.some((command) =>
-              canStop(props.runtime[command.id]?.status, command.stopCommand),
-            );
-            return (
-              <article className={`card project-card tone-${index % 4}`} key={project.id}>
-                <div className="project-index">{String(index + 1).padStart(2, "0")}</div>
-                <div className="card-head">
-                  <div className="folder-icon">
-                    <Glyph name="folder" />
-                  </div>
-                  <div className="card-title">
-                    <p className="stack-label">LOCAL STACK</p>
-                    <h2>{project.name}</h2>
-                    <p title={project.baseDir}>{project.baseDir}</p>
-                  </div>
-                  <Status label={state} />
-                </div>
-                <div className="service-list">
-                  {commands.length === 0 && <p className="muted">No commands configured.</p>}
-                  {commands.map((command) => {
-                    const status = props.runtime[command.id]?.status ?? "stopped";
-                    return (
-                      <div className="service-row" key={command.id}>
-                        <span className={`service-light ${status}`} />
-                        <div>
-                          <strong>{command.name}</strong>
-                          <code>{command.command}</code>
+        <div className="table-shell">
+          <table className="control-table">
+            <thead>
+              <tr>
+                <th scope="col">Stack</th>
+                <th scope="col">Service</th>
+                <th scope="col">State</th>
+                <th scope="col">Controls</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projects.map((project, index) => {
+                const commands = project.commandIds
+                  .map((id) => props.config.commands[id])
+                  .filter(Boolean);
+                const state = aggregateStatus(
+                  commands.map((command) => props.runtime[command.id]?.status),
+                );
+                const canStopStack = commands.some((command) =>
+                  canStop(props.runtime[command.id]?.status, command.stopCommand),
+                );
+                return (
+                  <Fragment key={project.id}>
+                    <tr className={`table-parent-row tone-${index % 4}`}>
+                      <th scope="row">
+                        <div className="table-stack">
+                          <span className="folder-icon">
+                            <Glyph name="folder" />
+                          </span>
+                          <span>
+                            <small>LOCAL STACK · {String(index + 1).padStart(2, "0")}</small>
+                            <strong>{project.name}</strong>
+                            <code title={project.baseDir}>{project.baseDir}</code>
+                          </span>
                         </div>
-                        <div className="row-actions">
-                          <button title="View logs" onClick={() => props.onLogs(command.id)}>
-                            Logs
+                      </th>
+                      <td>
+                        {commands.length} service{commands.length === 1 ? "" : "s"}
+                      </td>
+                      <td>
+                        <Status label={state} />
+                      </td>
+                      <td className="table-actions">
+                        <div className="manage-actions">
+                          <button onClick={() => props.onEdit(project)}>Configure</button>
+                          <button className="danger-text" onClick={() => props.onDelete(project)}>
+                            Remove
                           </button>
-                          {canStop(status, command.stopCommand) ? (
-                            <button
-                              className="stop"
-                              onClick={() => props.onStop({ kind: "command", id: command.id })}
-                            >
-                              Stop
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => props.onRun({ kind: "command", id: command.id })}
-                            >
-                              Run
-                            </button>
-                          )}
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <footer className="card-foot">
-                  <div>
-                    <button onClick={() => props.onEdit(project)}>Configure</button>
-                    <button className="danger-text" onClick={() => props.onDelete(project)}>
-                      Remove
-                    </button>
-                  </div>
-                  {canStopStack ? (
-                    <button
-                      className="stop"
-                      onClick={() => props.onStop({ kind: "project", id: project.id })}
-                    >
-                      Stop stack <Glyph name="stop" />
-                    </button>
-                  ) : (
-                    <button
-                      className="primary compact"
-                      disabled={!commands.length}
-                      onClick={() => props.onRun({ kind: "project", id: project.id })}
-                    >
-                      Run stack <Glyph name="launch" />
-                    </button>
-                  )}
-                </footer>
-              </article>
-            );
-          })}
+                        {canStopStack ? (
+                          <button
+                            className="stop"
+                            onClick={() => props.onStop({ kind: "project", id: project.id })}
+                          >
+                            Stop stack
+                          </button>
+                        ) : (
+                          <button
+                            className="primary compact"
+                            disabled={!commands.length}
+                            onClick={() => props.onRun({ kind: "project", id: project.id })}
+                          >
+                            Run stack
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {commands.length === 0 ? (
+                      <tr className="table-child-row">
+                        <td>
+                          <span className="tree-branch" aria-hidden="true" />
+                        </td>
+                        <td className="muted" colSpan={3}>
+                          No commands configured.
+                        </td>
+                      </tr>
+                    ) : (
+                      commands.map((command) => {
+                        const status = props.runtime[command.id]?.status ?? "stopped";
+                        return (
+                          <tr className="table-child-row" key={command.id}>
+                            <td>
+                              <span className="tree-branch" aria-hidden="true" />
+                            </td>
+                            <td>
+                              <div className="service-name">
+                                <span className={`service-light ${status}`} />
+                                <span>
+                                  <strong>{command.name}</strong>
+                                  <code>{command.command}</code>
+                                </span>
+                              </div>
+                            </td>
+                            <td>
+                              <Status label={status} />
+                            </td>
+                            <td className="table-actions">
+                              <button title="View logs" onClick={() => props.onLogs(command.id)}>
+                                Logs
+                              </button>
+                              {canStop(status, command.stopCommand) ? (
+                                <button
+                                  className="stop"
+                                  onClick={() => props.onStop({ kind: "command", id: command.id })}
+                                >
+                                  Stop
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => props.onRun({ kind: "command", id: command.id })}
+                                >
+                                  Run
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </section>

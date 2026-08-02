@@ -14,7 +14,7 @@ export function isLive(status?: ProcessStatus) {
 }
 
 export function canStop(status?: ProcessStatus, stopCommand?: string) {
-  return isLive(status) || Boolean(stopCommand?.trim());
+  return isLive(status) || (status === "completed" && Boolean(stopCommand?.trim()));
 }
 
 export function aggregateStatus(statuses: Array<ProcessStatus | undefined>) {

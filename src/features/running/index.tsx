@@ -89,7 +89,10 @@ export function RunningView(
               <div className="console-empty">Logs will appear here when a command runs.</div>
             ) : (
               visibleLogs.map((log) => (
-                <div className={`log-line ${log.stream}`} key={log.sequence}>
+                <div
+                  className={`log-line ${log.stream}${props.selected ? " selected-log" : ""}`}
+                  key={log.sequence}
+                >
                   <time>{new Date(log.timestamp).toLocaleTimeString()}</time>
                   {!props.selected && (
                     <b>{props.config.commands[log.commandId]?.name ?? log.commandId}</b>

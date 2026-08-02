@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Empty, Glyph, Modal, PageHeader, Status } from "../../components/ui";
 import {
   aggregateStatus,
@@ -36,52 +36,87 @@ export function GroupsView(
           action={props.onAdd}
         />
       ) : (
-        <div className="group-list">
-          {groups.map((group) => {
-            const ids = resolveGroup(group.id, props.config);
-            const states = ids.map((id) => props.runtime[id]?.status);
-            const active = states.some(isLive);
-            return (
-              <article className="card group-card" key={group.id}>
-                <div className="group-symbol">
-                  <Glyph name="recipe" />
-                </div>
-                <div className="group-main">
-                  <p className="stack-label">LAUNCH RECIPE</p>
-                  <h2>{group.name}</h2>
-                  <p>{describeTargets(group.targets, props.config)}</p>
-                  <div className="chips">
-                    <span>
-                      {ids.length} command{ids.length === 1 ? "" : "s"}
-                    </span>
-                    <Status label={aggregateStatus(states)} />
-                  </div>
-                </div>
-                <div className="group-actions">
-                  {active ? (
-                    <button
-                      className="stop"
-                      onClick={() => props.onStop({ kind: "group", id: group.id })}
-                    >
-                      Stop <Glyph name="stop" />
-                    </button>
-                  ) : (
-                    <button
-                      className="primary compact"
-                      disabled={!ids.length}
-                      onClick={() => props.onRun({ kind: "group", id: group.id })}
-                    >
-                      Run <Glyph name="launch" />
-                    </button>
-                  )}
-                  <button onClick={() => props.onEdit(group)}>Configure</button>
-                  <button className="danger-text" onClick={() => props.onDelete(group)}>
-                    Remove
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+        <div className="table-shell">
+          <table className="control-table recipe-table">
+            <thead>
+              <tr>
+                <th scope="col">Recipe</th>
+                <th scope="col">Includes</th>
+                <th scope="col">State</th>
+                <th scope="col">Controls</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((group) => {
+                const ids = resolveGroup(group.id, props.config);
+                const states = ids.map((id) => props.runtime[id]?.status);
+                const active = states.some(isLive);
+                return (
+                  <Fragment key={group.id}>
+                    <tr className="table-parent-row recipe-parent-row">
+                      <th scope="row">
+                        <div className="table-stack">
+                          <span className="group-symbol">
+                            <Glyph name="recipe" />
+                          </span>
+                          <span>
+                            <small>LAUNCH RECIPE</small>
+                            <strong>{group.name}</strong>
+                            <code>{describeTargets(group.targets, props.config)}</code>
+                          </span>
+                        </div>
+                      </th>
+                      <td>
+                        {ids.length} command{ids.length === 1 ? "" : "s"}
+                      </td>
+                      <td>
+                        <Status label={aggregateStatus(states)} />
+                      </td>
+                      <td className="table-actions">
+                        <div className="manage-actions">
+                          <button onClick={() => props.onEdit(group)}>Configure</button>
+                          <button className="danger-text" onClick={() => props.onDelete(group)}>
+                            Remove
+                          </button>
+                        </div>
+                        {active ? (
+                          <button
+                            className="stop"
+                            onClick={() => props.onStop({ kind: "group", id: group.id })}
+                          >
+                            Stop
+                          </button>
+                        ) : (
+                          <button
+                            className="primary compact"
+                            disabled={!ids.length}
+                            onClick={() => props.onRun({ kind: "group", id: group.id })}
+                          >
+                            Run
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {group.targets.map((target) => (
+                      <tr className="table-child-row" key={`${target.kind}-${target.id}`}>
+                        <td>
+                          <span className="tree-branch" aria-hidden="true" />
+                        </td>
+                        <td>
+                          <div className="target-row">
+                            <span className="target-kind">{target.kind[0].toUpperCase()}</span>
+                            <strong>{targetName(target, props.config)}</strong>
+                          </div>
+                        </td>
+                        <td className="muted">{target.kind}</td>
+                        <td />
+                      </tr>
+                    ))}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </section>
@@ -198,4 +233,12 @@ export function GroupEditor({
 
 function sameTarget(a: TargetRef, b: TargetRef) {
   return a.kind === b.kind && a.id === b.id;
+}
+
+function targetName(target: TargetRef, config: Config) {
+  return target.kind === "project"
+    ? (config.projects[target.id]?.name ?? "Missing project")
+    : target.kind === "command"
+      ? (config.commands[target.id]?.name ?? "Missing command")
+      : (config.groups[target.id]?.name ?? "Missing recipe");
 }

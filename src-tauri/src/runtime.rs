@@ -13,7 +13,7 @@ use tokio::time::{timeout, Duration};
 const LOG_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 const LINE_LIMIT_BYTES: usize = 64 * 1024;
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProcessStatus {
     Stopped,
@@ -64,7 +64,7 @@ struct ProcessControl {
 }
 
 pub struct RuntimeManager {
-    app: AppHandle,
+    app: Option<AppHandle>,
     entries: Mutex<HashMap<String, RuntimeEntry>>,
     logs: Mutex<LogBuffer>,
     controls: AsyncMutex<HashMap<String, ProcessControl>>,
@@ -73,6 +73,10 @@ pub struct RuntimeManager {
 
 impl RuntimeManager {
     pub fn new(app: AppHandle) -> Self {
+        Self::with_app(Some(app))
+    }
+
+    fn with_app(app: Option<AppHandle>) -> Self {
         Self {
             app,
             entries: Mutex::new(HashMap::new()),
@@ -258,14 +262,28 @@ impl RuntimeManager {
                 stop_command,
                 PathBuf::from(&project.base_dir).join(&command.cwd),
             );
-            if let Ok(mut child) = process.spawn() {
-                let _ = timeout(Duration::from_secs(8), child.wait()).await;
-            } else {
-                self.push_log(
+            match timeout(Duration::from_secs(8), process.output()).await {
+                Ok(Ok(output)) => {
+                    self.push_cleanup_output(&command.id, LogStream::Stdout, output.stdout);
+                    self.push_cleanup_output(&command.id, LogStream::Stderr, output.stderr);
+                    if !output.status.success() {
+                        self.push_log(
+                            &command.id,
+                            LogStream::System,
+                            "Configured stop command failed".into(),
+                        );
+                    }
+                }
+                Ok(Err(_)) => self.push_log(
                     &command.id,
                     LogStream::System,
                     "Could not start the configured stop command".into(),
-                );
+                ),
+                Err(_) => self.push_log(
+                    &command.id,
+                    LogStream::System,
+                    "Configured stop command timed out".into(),
+                ),
             }
         }
         if let Some(sender) = sender {
@@ -297,7 +315,9 @@ impl RuntimeManager {
     }
 
     fn emit_runtime(&self) {
-        let _ = self.app.emit("runtime-changed", self.snapshot());
+        if let Some(app) = &self.app {
+            let _ = app.emit("runtime-changed", self.snapshot());
+        }
     }
 
     fn push_log(&self, command_id: &str, stream: LogStream, mut text: String) {
@@ -326,7 +346,16 @@ impl RuntimeManager {
             }
         }
         drop(buffer);
-        let _ = self.app.emit("log-batch", vec![entry]);
+        if let Some(app) = &self.app {
+            let _ = app.emit("log-batch", vec![entry]);
+        }
+    }
+
+    fn push_cleanup_output(&self, command_id: &str, stream: LogStream, output: Vec<u8>) {
+        let text = String::from_utf8_lossy(&output);
+        for line in text.lines().filter(|line| !line.is_empty()) {
+            self.push_log(command_id, stream, line.into());
+        }
     }
 }
 
@@ -426,4 +455,129 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project() -> Project {
+        Project {
+            id: "project".into(),
+            name: "Test project".into(),
+            base_dir: std::env::current_dir().unwrap().display().to_string(),
+            command_ids: vec![],
+        }
+    }
+
+    fn command(id: &str, command: &str, stop_command: Option<&str>) -> HandyCommand {
+        HandyCommand {
+            id: id.into(),
+            project_id: "project".into(),
+            name: id.into(),
+            command: command.into(),
+            cwd: ".".into(),
+            stop_command: stop_command.map(str::to_owned),
+        }
+    }
+
+    async fn wait_for_status(runtime: &RuntimeManager, id: &str, status: ProcessStatus) {
+        for _ in 0..100 {
+            if runtime
+                .snapshot()
+                .iter()
+                .any(|entry| entry.command_id == id && entry.status == status)
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("{id} did not reach {status:?}");
+    }
+
+    async fn wait_for_log(runtime: &RuntimeManager, text: &str) {
+        for _ in 0..100 {
+            if runtime
+                .log_snapshot()
+                .iter()
+                .any(|entry| entry.text == text)
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("log entry {text:?} was not captured");
+    }
+
+    #[tokio::test]
+    async fn starts_stops_and_captures_both_log_streams() {
+        let runtime = Arc::new(RuntimeManager::with_app(None));
+        let project = project();
+        let command = command(
+            "server",
+            "printf 'stdout\\n'; printf 'stderr\\n' >&2; sleep 30",
+            None,
+        );
+
+        runtime
+            .start(command.clone(), project.clone())
+            .await
+            .unwrap();
+        wait_for_status(&runtime, "server", ProcessStatus::Running).await;
+        wait_for_log(&runtime, "stdout").await;
+        wait_for_log(&runtime, "stderr").await;
+
+        runtime.stop(&command, &project).await;
+        wait_for_status(&runtime, "server", ProcessStatus::Stopped).await;
+    }
+
+    #[tokio::test]
+    async fn completed_command_runs_its_configured_cleanup() {
+        let runtime = Arc::new(RuntimeManager::with_app(None));
+        let project = project();
+        let command = command("database", "true", Some("printf 'cleanup\\n'"));
+
+        runtime
+            .start(command.clone(), project.clone())
+            .await
+            .unwrap();
+        wait_for_status(&runtime, "database", ProcessStatus::Completed).await;
+
+        runtime.stop(&command, &project).await;
+        wait_for_status(&runtime, "database", ProcessStatus::Stopped).await;
+        wait_for_log(&runtime, "cleanup").await;
+        wait_for_log(&runtime, "Configured cleanup completed").await;
+    }
+
+    #[tokio::test]
+    async fn recipe_start_and_stop_preserves_shared_command_ownership() {
+        let runtime = Arc::new(RuntimeManager::with_app(None));
+        let project = project();
+        let command = command("api", "sleep 30", None);
+        let first = TargetRef {
+            kind: TargetKind::Group,
+            id: "first".into(),
+        };
+        let second = TargetRef {
+            kind: TargetKind::Group,
+            id: "second".into(),
+        };
+        let commands = HashSet::from(["api".into()]);
+
+        runtime.activate(first.clone(), commands.clone()).await;
+        runtime
+            .start(command.clone(), project.clone())
+            .await
+            .unwrap();
+        wait_for_status(&runtime, "api", ProcessStatus::Running).await;
+        runtime.activate(second.clone(), commands.clone()).await;
+
+        assert!(runtime
+            .deactivate(&first, commands.clone())
+            .await
+            .is_empty());
+        assert_eq!(runtime.deactivate(&second, commands).await, vec!["api"]);
+        runtime.stop(&command, &project).await;
+        wait_for_status(&runtime, "api", ProcessStatus::Stopped).await;
+    }
 }
