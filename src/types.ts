@@ -34,7 +34,13 @@ export interface Config {
   groups: Record<string, Group>;
 }
 
-export type ProcessStatus = "stopped" | "starting" | "running" | "stopping" | "completed" | "failed";
+export type ProcessStatus =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "completed"
+  | "failed";
 
 export interface RuntimeEntry {
   commandId: string;
@@ -62,5 +68,5 @@ export interface CommandSuggestion {
   command: string;
   cwd: string;
   source: string;
+  stopCommand?: string;
 }
-

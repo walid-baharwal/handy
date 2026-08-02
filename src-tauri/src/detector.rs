@@ -10,6 +10,8 @@ pub struct CommandSuggestion {
     command: String,
     cwd: String,
     source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop_command: Option<String>,
 }
 
 pub fn detect(base_dir: &str) -> Result<Vec<CommandSuggestion>, String> {
@@ -33,6 +35,7 @@ pub fn detect(base_dir: &str) -> Result<Vec<CommandSuggestion>, String> {
                 command: format!("{manager} run {name}"),
                 cwd: ".".into(),
                 source: "package.json".into(),
+                stop_command: None,
             }));
         }
     }
@@ -49,6 +52,7 @@ pub fn detect(base_dir: &str) -> Result<Vec<CommandSuggestion>, String> {
                 command: format!("docker compose -f {filename} up"),
                 cwd: ".".into(),
                 source: "Docker Compose".into(),
+                stop_command: Some(format!("docker compose -f {filename} down")),
             });
         }
     }

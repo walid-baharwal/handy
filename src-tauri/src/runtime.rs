@@ -237,22 +237,47 @@ impl RuntimeManager {
             .await
             .get(&command.id)
             .map(|control| control.stop.clone());
-        let Some(sender) = sender else { return };
-        self.set_status(&command.id, ProcessStatus::Stopping, None);
-        if let Some(stop_command) = command
+        let stop_command = command
             .stop_command
             .as_deref()
-            .filter(|value| !value.trim().is_empty())
-        {
+            .filter(|value| !value.trim().is_empty());
+
+        if sender.is_none() && stop_command.is_none() {
+            return;
+        }
+        if sender.is_some() {
+            self.set_status(&command.id, ProcessStatus::Stopping, None);
+        }
+        if let Some(stop_command) = stop_command {
+            self.push_log(
+                &command.id,
+                LogStream::System,
+                format!("Running stop command: {stop_command}"),
+            );
             let mut process = shell_command(
                 stop_command,
                 PathBuf::from(&project.base_dir).join(&command.cwd),
             );
             if let Ok(mut child) = process.spawn() {
                 let _ = timeout(Duration::from_secs(8), child.wait()).await;
+            } else {
+                self.push_log(
+                    &command.id,
+                    LogStream::System,
+                    "Could not start the configured stop command".into(),
+                );
             }
         }
-        let _ = sender.send(()).await;
+        if let Some(sender) = sender {
+            let _ = sender.send(()).await;
+        } else {
+            self.set_status(&command.id, ProcessStatus::Stopped, None);
+            self.push_log(
+                &command.id,
+                LogStream::System,
+                "Configured cleanup completed".into(),
+            );
+        }
     }
 
     fn set_status(&self, command_id: &str, status: ProcessStatus, exit_code: Option<i32>) {

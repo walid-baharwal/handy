@@ -1,11 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { CommandSuggestion, Config, Group, HandyCommand, LogEntry, Project, RuntimeEntry, Snapshot, TargetRef } from "./types";
+import type {
+  CommandSuggestion,
+  Config,
+  Group,
+  HandyCommand,
+  LogEntry,
+  Project,
+  RuntimeEntry,
+  Snapshot,
+  TargetRef,
+} from "./types";
 
 export const api = {
   snapshot: () => invoke<Snapshot>("get_snapshot"),
   detect: (baseDir: string) => invoke<CommandSuggestion[]>("detect_commands", { baseDir }),
-  saveProject: (project: Project, commands: HandyCommand[]) => invoke<Config>("save_project", { project, commands }),
+  saveProject: (project: Project, commands: HandyCommand[]) =>
+    invoke<Config>("save_project", { project, commands }),
   deleteProject: (id: string) => invoke<Config>("delete_project", { id }),
   saveGroup: (group: Group) => invoke<Config>("save_group", { group }),
   deleteGroup: (id: string) => invoke<Config>("delete_group", { id }),
@@ -17,4 +28,3 @@ export const api = {
   onLogs: (handler: (entries: LogEntry[]) => void): Promise<UnlistenFn> =>
     listen<LogEntry[]>("log-batch", (event) => handler(event.payload)),
 };
-
