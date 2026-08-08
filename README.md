@@ -31,6 +31,12 @@ pnpm install
 pnpm tauri dev
 ```
 
+On Fedora / Red Hat style systems, install the native packages once:
+
+```sh
+sudo dnf install webkit2gtk4.1-devel gcc-c++ curl wget file openssl-devel libappindicator-gtk3-devel librsvg2-devel xdotool dbus-devel
+```
+
 Checks:
 
 ```sh
@@ -40,6 +46,42 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 The `--no-default-features` test runs the portable configuration and graph tests without linking the OS desktop libraries.
+
+## Linux installers
+
+Handy can be packaged as native Linux installers with Tauri.
+
+Build both Linux package formats:
+
+```sh
+pnpm bundle
+```
+
+Build only a Debian package:
+
+```sh
+pnpm bundle:deb
+```
+
+Build only an RPM package:
+
+```sh
+pnpm bundle:rpm
+```
+
+The generated installers are written under `src-tauri/target/release/bundle/`, including:
+
+- `deb/` for Debian and Ubuntu
+- `rpm/` for Fedora, RHEL, Rocky, AlmaLinux, and similar distributions
+
+Install locally with:
+
+```sh
+sudo dpkg -i src-tauri/target/release/bundle/deb/*.deb
+sudo rpm -i src-tauri/target/release/bundle/rpm/*.rpm
+```
+
+For widest Linux compatibility, build on an older supported base such as Ubuntu 22.04 or Debian 12 so the resulting binaries do not require a newer glibc than your target systems provide. This follows Tauri's Linux distribution guidance.
 
 ## Storage and trust
 
@@ -52,4 +94,3 @@ Selective `.handy.json` import/export, tray/quit behavior, single-instance handl
 ## License
 
 MIT
-
