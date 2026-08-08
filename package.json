@@ -8,8 +8,8 @@
     "build": "tsc && vite build",
     "tauri": "tauri",
     "bundle": "pnpm tauri build",
-    "bundle:deb": "pnpm tauri build -- --bundles deb",
-    "bundle:rpm": "pnpm tauri build -- --bundles rpm",
+    "bundle:deb": "pnpm tauri build --bundles deb",
+    "bundle:rpm": "pnpm tauri build --bundles rpm",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "format": "biome format --write . && cargo fmt --manifest-path src-tauri/Cargo.toml",
     "format:check": "biome format . && cargo fmt --manifest-path src-tauri/Cargo.toml -- --check"
