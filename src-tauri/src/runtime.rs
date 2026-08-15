@@ -107,12 +107,7 @@ impl RuntimeManager {
     }
 
     pub fn can_stop(&self, command: &HandyCommand) -> bool {
-        let status = self
-            .entries
-            .lock()
-            .unwrap()
-            .get(&command.id)
-            .map(|entry| entry.status);
+        let status = self.status(&command.id);
         matches!(
             status,
             Some(ProcessStatus::Starting | ProcessStatus::Running | ProcessStatus::Stopping)
@@ -243,8 +238,9 @@ impl RuntimeManager {
         tokio::spawn(async move {
             let (was_stopped, result) = wait_or_stop(&mut child, pid, stop_receiver).await;
             runtime.controls.lock().await.remove(&command_id);
+            let was_stopping = runtime.status(&command_id) == Some(ProcessStatus::Stopping);
             match result {
-                Ok(status) if was_stopped => {
+                Ok(status) if was_stopped || was_stopping => {
                     runtime.set_status(&command_id, ProcessStatus::Stopped, status.code());
                     runtime.push_log(&command_id, LogStream::System, "Stopped".into());
                 }
@@ -279,12 +275,16 @@ impl RuntimeManager {
     }
 
     pub async fn stop(&self, command: &HandyCommand, project: &Project) {
-        let sender = self
-            .controls
-            .lock()
-            .await
-            .get(&command.id)
-            .map(|control| control.stop.clone());
+        let sender = {
+            let controls = self.controls.lock().await;
+            let sender = controls
+                .get(&command.id)
+                .map(|control| control.stop.clone());
+            if sender.is_some() {
+                self.set_status(&command.id, ProcessStatus::Stopping, None);
+            }
+            sender
+        };
         let stop_command = command
             .stop_command
             .as_deref()
@@ -292,9 +292,6 @@ impl RuntimeManager {
 
         if sender.is_none() && stop_command.is_none() {
             return;
-        }
-        if sender.is_some() {
-            self.set_status(&command.id, ProcessStatus::Stopping, None);
         }
         if let Some(stop_command) = stop_command {
             self.push_log(
@@ -331,14 +328,7 @@ impl RuntimeManager {
             }
         }
         if let Some(sender) = sender {
-            if sender.send(()).await.is_err() {
-                self.set_status(&command.id, ProcessStatus::Stopped, None);
-                self.push_log(
-                    &command.id,
-                    LogStream::System,
-                    "Configured cleanup completed".into(),
-                );
-            }
+            let _ = sender.send(()).await;
         } else {
             self.set_status(&command.id, ProcessStatus::Stopped, None);
             self.push_log(
@@ -363,6 +353,14 @@ impl RuntimeManager {
         );
         drop(entries);
         self.emit_runtime();
+    }
+
+    fn status(&self, command_id: &str) -> Option<ProcessStatus> {
+        self.entries
+            .lock()
+            .unwrap()
+            .get(command_id)
+            .map(|entry| entry.status)
     }
 
     fn emit_runtime(&self) {
