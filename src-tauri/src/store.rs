@@ -82,7 +82,8 @@ impl ConfigStore {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        self.path.with_extension(format!("json.corrupt-{timestamp}"))
+        self.path
+            .with_extension(format!("json.corrupt-{timestamp}"))
     }
 
     fn load_file(&self, path: &Path) -> Option<Config> {

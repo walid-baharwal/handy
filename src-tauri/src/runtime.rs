@@ -609,10 +609,7 @@ mod tests {
         let marker = std::env::temp_dir().join(format!("handy-stop-{}", now()));
         let command = command(
             "database",
-            &format!(
-                "while [ ! -f '{}' ]; do sleep 0.05; done",
-                marker.display()
-            ),
+            &format!("while [ ! -f '{}' ]; do sleep 0.05; done", marker.display()),
             Some(&format!("touch '{}'; sleep 0.2", marker.display())),
         );
 
