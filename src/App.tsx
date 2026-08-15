@@ -45,6 +45,7 @@ export default function App() {
         const [logs, bytes] = appendBoundedLogs([], 0, snapshot.logs);
         logBytes.current = bytes;
         setLogs(logs);
+        if (snapshot.startupWarning) setError(snapshot.startupWarning);
       })
       .catch(showError)
       .finally(() => setLoading(false));

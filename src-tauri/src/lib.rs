@@ -23,6 +23,7 @@ mod desktop {
         store: ConfigStore,
         runtime: Arc<RuntimeManager>,
         quitting: AtomicBool,
+        startup_warning: Option<String>,
     }
 
     #[derive(Serialize)]
@@ -30,6 +31,8 @@ mod desktop {
         config: Config,
         runtime: Vec<RuntimeEntry>,
         logs: Vec<LogEntry>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        startup_warning: Option<String>,
     }
 
     #[tauri::command]
@@ -38,6 +41,7 @@ mod desktop {
             config: state.config.lock().unwrap().clone(),
             runtime: state.runtime.snapshot(),
             logs: state.runtime.log_snapshot(),
+            startup_warning: state.startup_warning.clone(),
         }
     }
 
@@ -279,13 +283,14 @@ mod desktop {
             .setup(|app| {
                 let store =
                     ConfigStore::new(app.path().app_data_dir()?).map_err(std::io::Error::other)?;
-                let config = store.load();
+                let loaded = store.load();
                 let runtime = Arc::new(RuntimeManager::new(app.handle().clone()));
                 app.manage(AppState {
-                    config: Mutex::new(config),
+                    config: Mutex::new(loaded.config),
                     store,
                     runtime,
                     quitting: AtomicBool::new(false),
+                    startup_warning: loaded.warning,
                 });
 
                 let open = MenuItem::with_id(app, "open", "Open Handy", true, None::<&str>)?;
