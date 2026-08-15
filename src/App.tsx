@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { NavButton } from "./components/ui";
 import { GroupEditor, GroupsView } from "./features/groups";
 import { ProjectEditor, ProjectsView } from "./features/projects";
 import { RunningView } from "./features/running";
+import { appendBoundedLogs } from "./lib/runtime";
 import type {
   Config,
   Group,
@@ -29,6 +30,7 @@ export default function App() {
   const [selectedLog, setSelectedLog] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const logBytes = useRef(0);
 
   useEffect(() => {
     let disposed = false;
@@ -40,13 +42,21 @@ export default function App() {
         if (disposed) return;
         setConfig(snapshot.config);
         setRuntime(snapshot.runtime);
-        setLogs(snapshot.logs);
+        const [logs, bytes] = appendBoundedLogs([], 0, snapshot.logs);
+        logBytes.current = bytes;
+        setLogs(logs);
       })
       .catch(showError)
       .finally(() => setLoading(false));
     void api.onRuntime(setRuntime).then((fn) => (disposed ? fn() : unlisten.push(fn)));
     void api
-      .onLogs((entries) => setLogs((current) => [...current, ...entries]))
+      .onLogs((entries) =>
+        setLogs((current) => {
+          const [logs, bytes] = appendBoundedLogs(current, logBytes.current, entries);
+          logBytes.current = bytes;
+          return logs;
+        }),
+      )
       .then((fn) => (disposed ? fn() : unlisten.push(fn)));
 
     return () => {
@@ -183,6 +193,7 @@ export default function App() {
             onStop={stop}
             onClear={() => {
               void api.clearLogs();
+              logBytes.current = 0;
               setLogs([]);
             }}
           />

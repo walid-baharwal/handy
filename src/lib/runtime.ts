@@ -1,10 +1,31 @@
-import type { Config, ProcessStatus, RuntimeEntry, TargetRef } from "../types";
+import type { Config, LogEntry, ProcessStatus, RuntimeEntry, TargetRef } from "../types";
+
+export const LOG_LIMIT_BYTES = 32 * 1024 * 1024;
+const textEncoder = new TextEncoder();
 
 export interface CommonViewProps {
   config: Config;
   runtime: Record<string, RuntimeEntry>;
   onRun: (target: TargetRef) => void;
   onStop: (target: TargetRef) => void;
+}
+
+export function appendBoundedLogs(
+  current: LogEntry[],
+  currentBytes: number,
+  incoming: LogEntry[],
+  limit = LOG_LIMIT_BYTES,
+): [LogEntry[], number] {
+  const logs = [...current, ...incoming];
+  let bytes =
+    currentBytes +
+    incoming.reduce((total, entry) => total + textEncoder.encode(entry.text).length, 0);
+  let remove = 0;
+  while (bytes > limit && remove < logs.length) {
+    bytes -= textEncoder.encode(logs[remove].text).length;
+    remove += 1;
+  }
+  return [remove ? logs.slice(remove) : logs, bytes];
 }
 
 const liveStatuses: ProcessStatus[] = ["starting", "running", "stopping"];
