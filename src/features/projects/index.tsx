@@ -78,7 +78,12 @@ export function ProjectsView(
                       <td className="table-actions">
                         <div className="manage-actions">
                           <button onClick={() => props.onEdit(project)}>Configure</button>
-                          <button className="danger-text" onClick={() => props.onDelete(project)}>
+                          <button
+                            className="danger-text"
+                            disabled={canStopStack}
+                            title={canStopStack ? "Stop this stack before removing it" : undefined}
+                            onClick={() => props.onDelete(project)}
+                          >
                             Remove
                           </button>
                         </div>

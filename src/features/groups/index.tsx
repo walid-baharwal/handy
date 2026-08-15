@@ -2,8 +2,8 @@ import { Fragment, useState } from "react";
 import { Empty, Glyph, Modal, PageHeader, Status } from "../../components/ui";
 import {
   aggregateStatus,
+  canStop,
   describeTargets,
-  isLive,
   resolveGroup,
   type CommonViewProps,
 } from "../../lib/runtime";
@@ -50,7 +50,9 @@ export function GroupsView(
               {groups.map((group) => {
                 const ids = resolveGroup(group.id, props.config);
                 const states = ids.map((id) => props.runtime[id]?.status);
-                const active = states.some(isLive);
+                const active = ids.some((id) =>
+                  canStop(props.runtime[id]?.status, props.config.commands[id]?.stopCommand),
+                );
                 return (
                   <Fragment key={group.id}>
                     <tr className="table-parent-row recipe-parent-row">
@@ -75,7 +77,12 @@ export function GroupsView(
                       <td className="table-actions">
                         <div className="manage-actions">
                           <button onClick={() => props.onEdit(group)}>Configure</button>
-                          <button className="danger-text" onClick={() => props.onDelete(group)}>
+                          <button
+                            className="danger-text"
+                            disabled={active}
+                            title={active ? "Stop this recipe before removing it" : undefined}
+                            onClick={() => props.onDelete(group)}
+                          >
                             Remove
                           </button>
                         </div>

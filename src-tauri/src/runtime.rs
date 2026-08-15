@@ -1,4 +1,4 @@
-use crate::model::{HandyCommand, Project, TargetKind, TargetRef};
+use crate::model::{Config, HandyCommand, Project, TargetKind, TargetRef};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -8,7 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
-use tokio::time::{timeout, Duration};
+use tokio::task::JoinSet;
+use tokio::time::{sleep, timeout, Duration};
 
 const LOG_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 const LINE_LIMIT_BYTES: usize = 64 * 1024;
@@ -102,6 +103,44 @@ impl RuntimeManager {
         let mut buffer = self.logs.lock().unwrap();
         buffer.entries.clear();
         buffer.bytes = 0;
+    }
+
+    pub fn can_stop(&self, command: &HandyCommand) -> bool {
+        let status = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(&command.id)
+            .map(|entry| entry.status);
+        matches!(
+            status,
+            Some(ProcessStatus::Starting | ProcessStatus::Running | ProcessStatus::Stopping)
+        ) || (status == Some(ProcessStatus::Completed)
+            && command
+                .stop_command
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty()))
+    }
+
+    pub async fn shutdown(self: &Arc<Self>, config: Config) {
+        let mut stops = JoinSet::new();
+        for command in config.commands.values().filter(|command| self.can_stop(command)) {
+            let Some(project) = config.projects.get(&command.project_id) else {
+                continue;
+            };
+            let runtime = Arc::clone(self);
+            let command = command.clone();
+            let project = project.clone();
+            stops.spawn(async move { runtime.stop(&command, &project).await });
+        }
+        while stops.join_next().await.is_some() {}
+        self.active_targets.lock().await.clear();
+        let _ = timeout(Duration::from_secs(4), async {
+            while !self.controls.lock().await.is_empty() {
+                sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await;
     }
 
     pub async fn activate(&self, target: TargetRef, commands: HashSet<String>) {
@@ -429,7 +468,9 @@ fn shell_command(script: &str, cwd: PathBuf) -> tokio::process::Command {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
-    tokio::process::Command::from(command)
+    let mut command = tokio::process::Command::from(command);
+    command.kill_on_drop(true);
+    command
 }
 
 #[cfg(unix)]
@@ -579,5 +620,30 @@ mod tests {
         assert_eq!(runtime.deactivate(&second, commands).await, vec!["api"]);
         runtime.stop(&command, &project).await;
         wait_for_status(&runtime, "api", ProcessStatus::Stopped).await;
+    }
+
+    #[tokio::test]
+    async fn shutdown_stops_every_running_command() {
+        let runtime = Arc::new(RuntimeManager::with_app(None));
+        let mut project = project();
+        let first = command("api", "sleep 30", None);
+        let second = command("worker", "sleep 30", None);
+        project.command_ids = vec![first.id.clone(), second.id.clone()];
+
+        runtime.start(first.clone(), project.clone()).await.unwrap();
+        runtime.start(second.clone(), project.clone()).await.unwrap();
+        wait_for_status(&runtime, "api", ProcessStatus::Running).await;
+        wait_for_status(&runtime, "worker", ProcessStatus::Running).await;
+
+        let config = Config {
+            schema_version: 1,
+            projects: HashMap::from([(project.id.clone(), project)]),
+            commands: HashMap::from([(first.id.clone(), first), (second.id.clone(), second)]),
+            groups: HashMap::new(),
+        };
+        runtime.shutdown(config).await;
+
+        wait_for_status(&runtime, "api", ProcessStatus::Stopped).await;
+        wait_for_status(&runtime, "worker", ProcessStatus::Stopped).await;
     }
 }
