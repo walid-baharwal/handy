@@ -4,7 +4,7 @@ import { NavButton } from "./components/ui";
 import { GroupEditor, GroupsView } from "./features/groups";
 import { ProjectEditor, ProjectsView } from "./features/projects";
 import { RunningView } from "./features/running";
-import { appendBoundedLogs } from "./lib/runtime";
+import { appendBoundedLogs, mergeLogs } from "./lib/runtime";
 import type {
   Config,
   Group,
@@ -34,31 +34,52 @@ export default function App() {
 
   useEffect(() => {
     let disposed = false;
+    let initialized = false;
+    let latestRuntime: RuntimeEntry[] | null = null;
+    const pendingLogs: LogEntry[] = [];
     const unlisten: Array<() => void> = [];
 
-    void api
-      .snapshot()
-      .then((snapshot) => {
+    function appendLogs(entries: LogEntry[]) {
+      setLogs((current) => {
+        const [logs, bytes] = appendBoundedLogs(current, logBytes.current, entries);
+        logBytes.current = bytes;
+        return logs;
+      });
+    }
+
+    async function initialize() {
+      try {
+        const stopRuntime = await api.onRuntime((entries) => {
+          if (initialized) setRuntime(entries);
+          else latestRuntime = entries;
+        });
+        if (disposed) return stopRuntime();
+        unlisten.push(stopRuntime);
+
+        const stopLogs = await api.onLogs((entries) => {
+          if (initialized) appendLogs(entries);
+          else pendingLogs.push(...entries);
+        });
+        if (disposed) return stopLogs();
+        unlisten.push(stopLogs);
+
+        const snapshot = await api.snapshot();
         if (disposed) return;
         setConfig(snapshot.config);
-        setRuntime(snapshot.runtime);
-        const [logs, bytes] = appendBoundedLogs([], 0, snapshot.logs);
+        setRuntime(latestRuntime ?? snapshot.runtime);
+        const [logs, bytes] = appendBoundedLogs([], 0, mergeLogs(snapshot.logs, pendingLogs));
         logBytes.current = bytes;
+        initialized = true;
         setLogs(logs);
         if (snapshot.startupWarning) setError(snapshot.startupWarning);
-      })
-      .catch(showError)
-      .finally(() => setLoading(false));
-    void api.onRuntime(setRuntime).then((fn) => (disposed ? fn() : unlisten.push(fn)));
-    void api
-      .onLogs((entries) =>
-        setLogs((current) => {
-          const [logs, bytes] = appendBoundedLogs(current, logBytes.current, entries);
-          logBytes.current = bytes;
-          return logs;
-        }),
-      )
-      .then((fn) => (disposed ? fn() : unlisten.push(fn)));
+      } catch (error) {
+        if (!disposed) showError(error);
+      } finally {
+        if (!disposed) setLoading(false);
+      }
+    }
+
+    void initialize();
 
     return () => {
       disposed = true;
@@ -193,9 +214,20 @@ export default function App() {
             onRun={run}
             onStop={stop}
             onClear={() => {
-              void api.clearLogs();
-              logBytes.current = 0;
-              setLogs([]);
+              void api
+                .clearLogs()
+                .then((boundary) => {
+                  setLogs((current) => {
+                    const [logs, bytes] = appendBoundedLogs(
+                      [],
+                      0,
+                      current.filter((entry) => entry.sequence >= boundary),
+                    );
+                    logBytes.current = bytes;
+                    return logs;
+                  });
+                })
+                .catch(showError);
             }}
           />
         )}

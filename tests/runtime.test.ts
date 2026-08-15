@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendBoundedLogs } from "../src/lib/runtime.ts";
+import { appendBoundedLogs, mergeLogs } from "../src/lib/runtime.ts";
 import type { LogEntry } from "../src/types.ts";
 
 function log(sequence: number, text: string): LogEntry {
@@ -19,4 +19,11 @@ test("bounded logs keep the newest complete UTF-8 entries", () => {
     [2, 3],
   );
   assert.equal(bytes, 8);
+});
+
+test("snapshot and pending logs merge once in sequence order", () => {
+  assert.deepEqual(
+    mergeLogs([log(1, "first"), log(2, "duplicate")], [log(2, "second"), log(3, "last")]),
+    [log(1, "first"), log(2, "second"), log(3, "last")],
+  );
 });

@@ -238,8 +238,8 @@ mod desktop {
     }
 
     #[tauri::command]
-    fn clear_logs(state: State<'_, AppState>) {
-        state.runtime.clear_logs();
+    fn clear_logs(state: State<'_, AppState>) -> u64 {
+        state.runtime.clear_logs()
     }
 
     fn target_is_stoppable(

@@ -22,7 +22,7 @@ export const api = {
   deleteGroup: (id: string) => invoke<Config>("delete_group", { id }),
   start: (target: TargetRef) => invoke<void>("start_target", { target }),
   stop: (target: TargetRef) => invoke<void>("stop_target", { target }),
-  clearLogs: () => invoke<void>("clear_logs"),
+  clearLogs: () => invoke<number>("clear_logs"),
   onRuntime: (handler: (entries: RuntimeEntry[]) => void): Promise<UnlistenFn> =>
     listen<RuntimeEntry[]>("runtime-changed", (event) => handler(event.payload)),
   onLogs: (handler: (entries: LogEntry[]) => void): Promise<UnlistenFn> =>

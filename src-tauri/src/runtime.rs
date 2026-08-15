@@ -99,10 +99,11 @@ impl RuntimeManager {
         self.logs.lock().unwrap().entries.iter().cloned().collect()
     }
 
-    pub fn clear_logs(&self) {
+    pub fn clear_logs(&self) -> u64 {
         let mut buffer = self.logs.lock().unwrap();
         buffer.entries.clear();
         buffer.bytes = 0;
+        buffer.next_sequence
     }
 
     pub fn can_stop(&self, command: &HandyCommand) -> bool {
@@ -330,7 +331,14 @@ impl RuntimeManager {
             }
         }
         if let Some(sender) = sender {
-            let _ = sender.send(()).await;
+            if sender.send(()).await.is_err() {
+                self.set_status(&command.id, ProcessStatus::Stopped, None);
+                self.push_log(
+                    &command.id,
+                    LogStream::System,
+                    "Configured cleanup completed".into(),
+                );
+            }
         } else {
             self.set_status(&command.id, ProcessStatus::Stopped, None);
             self.push_log(
@@ -592,6 +600,43 @@ mod tests {
         wait_for_status(&runtime, "database", ProcessStatus::Stopped).await;
         wait_for_log(&runtime, "cleanup").await;
         wait_for_log(&runtime, "Configured cleanup completed").await;
+    }
+
+    #[tokio::test]
+    async fn cleanup_that_ends_a_process_finishes_as_stopped() {
+        let runtime = Arc::new(RuntimeManager::with_app(None));
+        let project = project();
+        let marker = std::env::temp_dir().join(format!("handy-stop-{}", now()));
+        let command = command(
+            "database",
+            &format!(
+                "while [ ! -f '{}' ]; do sleep 0.05; done",
+                marker.display()
+            ),
+            Some(&format!("touch '{}'; sleep 0.2", marker.display())),
+        );
+
+        runtime
+            .start(command.clone(), project.clone())
+            .await
+            .unwrap();
+        wait_for_status(&runtime, "database", ProcessStatus::Running).await;
+        runtime.stop(&command, &project).await;
+        wait_for_status(&runtime, "database", ProcessStatus::Stopped).await;
+
+        let _ = std::fs::remove_file(marker);
+    }
+
+    #[test]
+    fn clearing_logs_returns_the_next_sequence() {
+        let runtime = RuntimeManager::with_app(None);
+        runtime.push_log("api", LogStream::Stdout, "before".into());
+
+        let boundary = runtime.clear_logs();
+        runtime.push_log("api", LogStream::Stdout, "after".into());
+
+        assert_eq!(boundary, 2);
+        assert_eq!(runtime.log_snapshot()[0].sequence, boundary);
     }
 
     #[tokio::test]

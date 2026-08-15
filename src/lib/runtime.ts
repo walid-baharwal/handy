@@ -28,6 +28,14 @@ export function appendBoundedLogs(
   return [remove ? logs.slice(remove) : logs, bytes];
 }
 
+export function mergeLogs(...sources: LogEntry[][]): LogEntry[] {
+  const entries = new Map<number, LogEntry>();
+  for (const source of sources) {
+    for (const entry of source) entries.set(entry.sequence, entry);
+  }
+  return [...entries.values()].sort((a, b) => a.sequence - b.sequence);
+}
+
 const liveStatuses: ProcessStatus[] = ["starting", "running", "stopping"];
 
 export function isLive(status?: ProcessStatus) {
