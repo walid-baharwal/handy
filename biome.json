@@ -10,7 +10,8 @@
       "tsconfig.json",
       "tsconfig.node.json",
       "src-tauri/tauri.conf.json",
-      "src-tauri/capabilities/*.json"
+      "src-tauri/capabilities/*.json",
+      "tests/**/*.ts"
     ]
   },
   "formatter": {

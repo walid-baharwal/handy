@@ -61,6 +61,7 @@ export interface Snapshot {
   config: Config;
   runtime: RuntimeEntry[];
   logs: LogEntry[];
+  startupWarning?: string;
 }
 
 export interface CommandSuggestion {
