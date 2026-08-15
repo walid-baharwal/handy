@@ -183,7 +183,7 @@ export function ProjectEditor({
   );
   const [suggestions, setSuggestions] = useState<CommandSuggestion[]>([]);
   const [saving, setSaving] = useState(false);
-  const projectId = value?.id ?? crypto.randomUUID();
+  const [projectId] = useState(() => value?.id ?? crypto.randomUUID());
 
   async function chooseFolder() {
     const selected = await open({

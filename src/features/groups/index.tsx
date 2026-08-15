@@ -139,7 +139,7 @@ export function GroupEditor({
   const [name, setName] = useState(value?.name ?? "");
   const [targets, setTargets] = useState<TargetRef[]>(value?.targets ?? []);
   const [search, setSearch] = useState("");
-  const groupId = value?.id ?? crypto.randomUUID();
+  const [groupId] = useState(() => value?.id ?? crypto.randomUUID());
   const choices: Array<{ target: TargetRef; name: string; detail: string }> = [
     ...Object.values(config.projects).map((project) => ({
       target: { kind: "project" as const, id: project.id },
