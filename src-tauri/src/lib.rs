@@ -78,7 +78,10 @@ mod desktop {
                         || old.stop_command != new.stop_command
                 });
                 if state.runtime.can_stop(old) && (base_dir_changed || execution_changed) {
-                    return Err(format!("Stop '{}' before changing or removing it", old.name));
+                    return Err(format!(
+                        "Stop '{}' before changing or removing it",
+                        old.name
+                    ));
                 }
             }
         }

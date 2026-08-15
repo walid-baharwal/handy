@@ -124,7 +124,11 @@ impl RuntimeManager {
 
     pub async fn shutdown(self: &Arc<Self>, config: Config) {
         let mut stops = JoinSet::new();
-        for command in config.commands.values().filter(|command| self.can_stop(command)) {
+        for command in config
+            .commands
+            .values()
+            .filter(|command| self.can_stop(command))
+        {
             let Some(project) = config.projects.get(&command.project_id) else {
                 continue;
             };
@@ -631,7 +635,10 @@ mod tests {
         project.command_ids = vec![first.id.clone(), second.id.clone()];
 
         runtime.start(first.clone(), project.clone()).await.unwrap();
-        runtime.start(second.clone(), project.clone()).await.unwrap();
+        runtime
+            .start(second.clone(), project.clone())
+            .await
+            .unwrap();
         wait_for_status(&runtime, "api", ProcessStatus::Running).await;
         wait_for_status(&runtime, "worker", ProcessStatus::Running).await;
 
