@@ -17,6 +17,7 @@ mod desktop {
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::TrayIconBuilder;
     use tauri::{AppHandle, Manager, State, WindowEvent};
+    use tokio::time::{interval, Duration, MissedTickBehavior};
 
     struct AppState {
         config: Mutex<Config>,
@@ -292,6 +293,25 @@ mod desktop {
                     runtime,
                     quitting: AtomicBool::new(false),
                     startup_warning: loaded.warning,
+                });
+                let monitor_app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut ticks = interval(Duration::from_secs(15));
+                    ticks.set_missed_tick_behavior(MissedTickBehavior::Skip);
+                    loop {
+                        ticks.tick().await;
+                        let (runtime, config, quitting) = {
+                            let state = monitor_app.state::<AppState>();
+                            let runtime = Arc::clone(&state.runtime);
+                            let config = state.config.lock().unwrap().clone();
+                            let quitting = state.quitting.load(Ordering::SeqCst);
+                            (runtime, config, quitting)
+                        };
+                        if quitting {
+                            break;
+                        }
+                        runtime.refresh_statuses(&config).await;
+                    }
                 });
 
                 let open = MenuItem::with_id(app, "open", "Open Handy", true, None::<&str>)?;
