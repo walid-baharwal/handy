@@ -9,7 +9,8 @@ This first implementation includes:
 - Reusable nested groups with cycle validation and deduplicated commands
 - Project, group, and individual Run/Stop controls
 - Shared-service ownership: stopping one group keeps commands needed by another active group
-- Per-command and merged live logs with a 32 MiB in-memory session limit
+- Per-command and merged live logs with smart scroll following and a 32 MiB session limit
+- Optional status commands that detect services started or stopped outside Handy
 - Versioned JSON persistence with an automatic backup; no database or cloud service
 - Linux, macOS, and Windows process-tree termination
 
@@ -86,6 +87,19 @@ For widest Linux compatibility, build on an older supported base such as Ubuntu 
 ## Storage and trust
 
 Configuration is stored as `config.v1.json` under Tauri's application data directory. Commands are executed through the user's login shell and have the same permissions as Handy, so only add or import commands you trust.
+
+## External service status
+
+Set a command's optional status command when you want Handy to recognize a service started from another terminal or before Handy opened. Handy runs the check from the command's working directory when it starts, then every 15 seconds.
+
+- Exit code `0` means the service is running.
+- Any other exit code means the service is stopped.
+- Handy stops a service it detected outside the app only when you configure a stop command.
+- Quitting Handy leaves externally started services running.
+
+Docker Compose suggestions include status and stop commands. Handy treats the Compose command as running while at least one container reports a running state.
+
+Handy keeps direct child-process tracking for commands without a status command. Process-name matching is not used because unrelated programs can share the same executable or command line.
 
 ## Next slices
 
