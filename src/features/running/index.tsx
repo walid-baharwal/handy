@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { PageHeader } from "../../components/ui";
 import { canStop, type CommonViewProps } from "../../lib/runtime";
 import type { LogEntry } from "../../types";
@@ -12,6 +12,8 @@ export function RunningView(
   },
 ) {
   const [search, setSearch] = useState("");
+  const consoleRef = useRef<HTMLDivElement>(null);
+  const followLogs = useRef(true);
   const commands = Object.values(props.config.commands).filter(
     (command) =>
       props.runtime[command.id] || props.logs.some((log) => log.commandId === command.id),
@@ -21,6 +23,18 @@ export function RunningView(
       (!props.selected || log.commandId === props.selected) &&
       (!search || log.text.toLowerCase().includes(search.toLowerCase())),
   );
+  const lastVisibleSequence = visibleLogs.at(-1)?.sequence;
+
+  useLayoutEffect(() => {
+    followLogs.current = true;
+    const console = consoleRef.current;
+    if (console) console.scrollTop = console.scrollHeight;
+  }, [props.selected, search]);
+
+  useLayoutEffect(() => {
+    const console = consoleRef.current;
+    if (console && followLogs.current) console.scrollTop = console.scrollHeight;
+  }, [lastVisibleSequence]);
 
   return (
     <section className="running-page">
@@ -84,7 +98,15 @@ export function RunningView(
                 </button>
               ))}
           </div>
-          <div className="console">
+          <div
+            className="console"
+            ref={consoleRef}
+            onScroll={(event) => {
+              const console = event.currentTarget;
+              followLogs.current =
+                console.scrollHeight - console.scrollTop - console.clientHeight <= 24;
+            }}
+          >
             {visibleLogs.length === 0 ? (
               <div className="console-empty">Logs will appear here when a command runs.</div>
             ) : (
