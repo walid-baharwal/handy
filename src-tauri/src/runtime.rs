@@ -166,16 +166,12 @@ impl RuntimeManager {
 
     pub async fn refresh_statuses(self: &Arc<Self>, config: &Config) {
         let mut checks = JoinSet::new();
-        for command in config
-            .commands
-            .values()
-            .filter(|command| {
-                command
-                    .status_command
-                    .as_deref()
-                    .is_some_and(|value| !value.trim().is_empty())
-            })
-        {
+        for command in config.commands.values().filter(|command| {
+            command
+                .status_command
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+        }) {
             let Some(project) = config.projects.get(&command.project_id) else {
                 continue;
             };
@@ -327,12 +323,7 @@ impl RuntimeManager {
                     );
                 }
                 Err(error) => {
-                    runtime.set_status(
-                        &command_id,
-                        ProcessStatus::Failed,
-                        None,
-                        needs_cleanup,
-                    );
+                    runtime.set_status(&command_id, ProcessStatus::Failed, None, needs_cleanup);
                     runtime.push_log(
                         &command_id,
                         LogStream::System,
@@ -458,7 +449,10 @@ impl RuntimeManager {
         let current = entries.get(&command.id);
         if current.is_some_and(|entry| {
             entry.managed
-                && matches!(entry.status, ProcessStatus::Starting | ProcessStatus::Stopping)
+                && matches!(
+                    entry.status,
+                    ProcessStatus::Starting | ProcessStatus::Stopping
+                )
         }) || current.is_some_and(|entry| entry.status == status)
         {
             return;
@@ -731,11 +725,7 @@ mod tests {
         let marker = std::env::temp_dir().join(format!("handy-status-{}", now()));
         let launched = std::env::temp_dir().join(format!("handy-launched-{}", now()));
         std::fs::write(&marker, "running").unwrap();
-        let mut command = command(
-            "api",
-            &format!("touch '{}'", launched.display()),
-            None,
-        );
+        let mut command = command("api", &format!("touch '{}'", launched.display()), None);
         command.status_command = Some(format!("test -f '{}'", marker.display()));
         project.command_ids = vec![command.id.clone()];
         let config = Config {
