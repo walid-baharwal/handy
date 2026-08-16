@@ -111,12 +111,7 @@ impl RuntimeManager {
     }
 
     pub fn can_stop(&self, command: &HandyCommand) -> bool {
-        let entry = self
-            .entries
-            .lock()
-            .unwrap()
-            .get(&command.id)
-            .cloned();
+        let entry = self.entries.lock().unwrap().get(&command.id).cloned();
         let has_stop_command = command
             .stop_command
             .as_deref()
