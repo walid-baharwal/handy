@@ -188,6 +188,8 @@ pub struct HandyCommand {
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_command: Option<String>,
 }
 
 fn default_cwd() -> String {
@@ -236,6 +238,7 @@ mod tests {
             command: "npm start".into(),
             cwd: ".".into(),
             stop_command: None,
+            status_command: None,
         };
         Config {
             schema_version: 1,

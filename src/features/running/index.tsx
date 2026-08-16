@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { PageHeader } from "../../components/ui";
-import { canStop, type CommonViewProps } from "../../lib/runtime";
+import { canStop, isLive, type CommonViewProps } from "../../lib/runtime";
 import type { LogEntry } from "../../types";
 
 export function RunningView(
@@ -12,6 +12,8 @@ export function RunningView(
   },
 ) {
   const [search, setSearch] = useState("");
+  const consoleRef = useRef<HTMLDivElement>(null);
+  const followLogs = useRef(true);
   const commands = Object.values(props.config.commands).filter(
     (command) =>
       props.runtime[command.id] || props.logs.some((log) => log.commandId === command.id),
@@ -21,6 +23,25 @@ export function RunningView(
       (!props.selected || log.commandId === props.selected) &&
       (!search || log.text.toLowerCase().includes(search.toLowerCase())),
   );
+  const lastVisibleSequence = visibleLogs.at(-1)?.sequence;
+  const selectedEntry = props.selected ? props.runtime[props.selected] : undefined;
+  const selectedCommand = props.selected ? props.config.commands[props.selected] : undefined;
+  const selectedCanStop = canStop(
+    selectedEntry?.status,
+    selectedCommand?.stopCommand,
+    selectedEntry?.managed,
+  );
+
+  useLayoutEffect(() => {
+    followLogs.current = true;
+    const console = consoleRef.current;
+    if (console) console.scrollTop = console.scrollHeight;
+  }, [props.selected, search]);
+
+  useLayoutEffect(() => {
+    const console = consoleRef.current;
+    if (console && followLogs.current) console.scrollTop = console.scrollHeight;
+  }, [lastVisibleSequence]);
 
   return (
     <section className="running-page">
@@ -68,23 +89,30 @@ export function RunningView(
             <span>{visibleLogs.length} lines</span>
             <button onClick={props.onClear}>Clear</button>
             {props.selected &&
-              (canStop(
-                props.runtime[props.selected]?.status,
-                props.config.commands[props.selected]?.stopCommand,
-              ) ? (
+              (selectedCanStop ? (
                 <button
                   className="stop"
                   onClick={() => props.onStop({ kind: "command", id: props.selected! })}
                 >
                   Stop
                 </button>
+              ) : isLive(selectedEntry?.status) ? (
+                <button disabled>Running externally</button>
               ) : (
                 <button onClick={() => props.onRun({ kind: "command", id: props.selected! })}>
                   Run
                 </button>
               ))}
           </div>
-          <div className="console">
+          <div
+            className="console"
+            ref={consoleRef}
+            onScroll={(event) => {
+              const console = event.currentTarget;
+              followLogs.current =
+                console.scrollHeight - console.scrollTop - console.clientHeight <= 24;
+            }}
+          >
             {visibleLogs.length === 0 ? (
               <div className="console-empty">Logs will appear here when a command runs.</div>
             ) : (

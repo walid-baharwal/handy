@@ -19,6 +19,7 @@ export interface HandyCommand {
   command: string;
   cwd: string;
   stopCommand?: string;
+  statusCommand?: string;
 }
 
 export interface Group {
@@ -45,6 +46,7 @@ export type ProcessStatus =
 export interface RuntimeEntry {
   commandId: string;
   status: ProcessStatus;
+  managed: boolean;
   exitCode?: number;
   startedAt?: number;
 }
@@ -70,4 +72,5 @@ export interface CommandSuggestion {
   cwd: string;
   source: string;
   stopCommand?: string;
+  statusCommand?: string;
 }

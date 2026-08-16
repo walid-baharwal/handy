@@ -13,6 +13,7 @@ use tokio::time::{sleep, timeout, Duration};
 
 const LOG_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 const LINE_LIMIT_BYTES: usize = 64 * 1024;
+const STATUS_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -30,6 +31,7 @@ pub enum ProcessStatus {
 pub struct RuntimeEntry {
     pub command_id: String,
     pub status: ProcessStatus,
+    pub managed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,6 +72,7 @@ pub struct RuntimeManager {
     logs: Mutex<LogBuffer>,
     controls: AsyncMutex<HashMap<String, ProcessControl>>,
     active_targets: AsyncMutex<HashMap<TargetRef, HashSet<String>>>,
+    status_warnings: Mutex<HashSet<String>>,
 }
 
 impl RuntimeManager {
@@ -88,6 +91,7 @@ impl RuntimeManager {
             }),
             controls: AsyncMutex::new(HashMap::new()),
             active_targets: AsyncMutex::new(HashMap::new()),
+            status_warnings: Mutex::new(HashSet::new()),
         }
     }
 
@@ -107,15 +111,18 @@ impl RuntimeManager {
     }
 
     pub fn can_stop(&self, command: &HandyCommand) -> bool {
-        let status = self.status(&command.id);
-        matches!(
-            status,
-            Some(ProcessStatus::Starting | ProcessStatus::Running | ProcessStatus::Stopping)
-        ) || (status == Some(ProcessStatus::Completed)
-            && command
-                .stop_command
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty()))
+        let entry = self.entries.lock().unwrap().get(&command.id).cloned();
+        let has_stop_command = command
+            .stop_command
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+        entry.is_some_and(|entry| {
+            (matches!(
+                entry.status,
+                ProcessStatus::Starting | ProcessStatus::Running | ProcessStatus::Stopping
+            ) && (entry.managed || has_stop_command))
+                || (entry.status == ProcessStatus::Completed && has_stop_command)
+        })
     }
 
     pub async fn shutdown(self: &Arc<Self>, config: Config) {
@@ -123,7 +130,7 @@ impl RuntimeManager {
         for command in config
             .commands
             .values()
-            .filter(|command| self.can_stop(command))
+            .filter(|command| self.is_managed(&command.id) && self.can_stop(command))
         {
             let Some(project) = config.projects.get(&command.project_id) else {
                 continue;
@@ -160,6 +167,48 @@ impl RuntimeManager {
             .collect()
     }
 
+    pub async fn refresh_statuses(self: &Arc<Self>, config: &Config) {
+        let mut checks = JoinSet::new();
+        for command in config.commands.values().filter(|command| {
+            command
+                .status_command
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+        }) {
+            let Some(project) = config.projects.get(&command.project_id) else {
+                continue;
+            };
+            let runtime = Arc::clone(self);
+            let command = command.clone();
+            let project = project.clone();
+            checks.spawn(async move { runtime.refresh_status(&command, &project).await });
+        }
+        while checks.join_next().await.is_some() {}
+    }
+
+    async fn refresh_status(&self, command: &HandyCommand, project: &Project) {
+        if self.controls.lock().await.contains_key(&command.id) {
+            return;
+        }
+        let Some(status_command) = command.status_command.as_deref() else {
+            return;
+        };
+        let mut process = shell_command(
+            status_command,
+            PathBuf::from(&project.base_dir).join(&command.cwd),
+        );
+        match timeout(STATUS_TIMEOUT, process.output()).await {
+            Ok(Ok(output)) => {
+                self.status_warnings.lock().unwrap().remove(&command.id);
+                self.set_external_status(command, output.status.success());
+            }
+            Ok(Err(error)) => {
+                self.warn_status_once(command, format!("Status check failed: {error}"))
+            }
+            Err(_) => self.warn_status_once(command, "Status check timed out".into()),
+        }
+    }
+
     pub async fn start(
         self: &Arc<Self>,
         command: HandyCommand,
@@ -178,6 +227,7 @@ impl RuntimeManager {
                 RuntimeEntry {
                     command_id: command.id.clone(),
                     status: ProcessStatus::Starting,
+                    managed: true,
                     exit_code: None,
                     started_at: Some(now()),
                 },
@@ -190,7 +240,7 @@ impl RuntimeManager {
         let mut child = match process.spawn() {
             Ok(child) => child,
             Err(error) => {
-                self.set_status(&command.id, ProcessStatus::Failed, None);
+                self.set_status(&command.id, ProcessStatus::Failed, None, false);
                 self.push_log(
                     &command.id,
                     LogStream::System,
@@ -209,7 +259,7 @@ impl RuntimeManager {
             .lock()
             .await
             .insert(command.id.clone(), ProcessControl { stop });
-        self.set_status(&command.id, ProcessStatus::Running, None);
+        self.set_status(&command.id, ProcessStatus::Running, None, true);
         self.push_log(
             &command.id,
             LogStream::System,
@@ -234,6 +284,10 @@ impl RuntimeManager {
         }
 
         let runtime = Arc::clone(self);
+        let needs_cleanup = command
+            .stop_command
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
         let command_id = command.id;
         tokio::spawn(async move {
             let (was_stopped, result) = wait_or_stop(&mut child, pid, stop_receiver).await;
@@ -241,15 +295,25 @@ impl RuntimeManager {
             let was_stopping = runtime.status(&command_id) == Some(ProcessStatus::Stopping);
             match result {
                 Ok(status) if was_stopped || was_stopping => {
-                    runtime.set_status(&command_id, ProcessStatus::Stopped, status.code());
+                    runtime.set_status(&command_id, ProcessStatus::Stopped, status.code(), false);
                     runtime.push_log(&command_id, LogStream::System, "Stopped".into());
                 }
                 Ok(status) if status.success() => {
-                    runtime.set_status(&command_id, ProcessStatus::Completed, status.code());
+                    runtime.set_status(
+                        &command_id,
+                        ProcessStatus::Completed,
+                        status.code(),
+                        needs_cleanup,
+                    );
                     runtime.push_log(&command_id, LogStream::System, "Completed".into());
                 }
                 Ok(status) => {
-                    runtime.set_status(&command_id, ProcessStatus::Failed, status.code());
+                    runtime.set_status(
+                        &command_id,
+                        ProcessStatus::Failed,
+                        status.code(),
+                        needs_cleanup,
+                    );
                     runtime.push_log(
                         &command_id,
                         LogStream::System,
@@ -262,7 +326,7 @@ impl RuntimeManager {
                     );
                 }
                 Err(error) => {
-                    runtime.set_status(&command_id, ProcessStatus::Failed, None);
+                    runtime.set_status(&command_id, ProcessStatus::Failed, None, needs_cleanup);
                     runtime.push_log(
                         &command_id,
                         LogStream::System,
@@ -281,7 +345,7 @@ impl RuntimeManager {
                 .get(&command.id)
                 .map(|control| control.stop.clone());
             if sender.is_some() {
-                self.set_status(&command.id, ProcessStatus::Stopping, None);
+                self.set_status(&command.id, ProcessStatus::Stopping, None, true);
             }
             sender
         };
@@ -293,6 +357,7 @@ impl RuntimeManager {
         if sender.is_none() && stop_command.is_none() {
             return;
         }
+        let mut cleanup_succeeded = true;
         if let Some(stop_command) = stop_command {
             self.push_log(
                 &command.id,
@@ -308,6 +373,7 @@ impl RuntimeManager {
                     self.push_cleanup_output(&command.id, LogStream::Stdout, output.stdout);
                     self.push_cleanup_output(&command.id, LogStream::Stderr, output.stderr);
                     if !output.status.success() {
+                        cleanup_succeeded = false;
                         self.push_log(
                             &command.id,
                             LogStream::System,
@@ -315,22 +381,37 @@ impl RuntimeManager {
                         );
                     }
                 }
-                Ok(Err(_)) => self.push_log(
-                    &command.id,
-                    LogStream::System,
-                    "Could not start the configured stop command".into(),
-                ),
-                Err(_) => self.push_log(
-                    &command.id,
-                    LogStream::System,
-                    "Configured stop command timed out".into(),
-                ),
+                Ok(Err(_)) => {
+                    cleanup_succeeded = false;
+                    self.push_log(
+                        &command.id,
+                        LogStream::System,
+                        "Could not start the configured stop command".into(),
+                    );
+                }
+                Err(_) => {
+                    cleanup_succeeded = false;
+                    self.push_log(
+                        &command.id,
+                        LogStream::System,
+                        "Configured stop command timed out".into(),
+                    );
+                }
             }
         }
         if let Some(sender) = sender {
             let _ = sender.send(()).await;
-        } else {
-            self.set_status(&command.id, ProcessStatus::Stopped, None);
+        } else if command.status_command.is_some() {
+            self.refresh_status(command, project).await;
+            if cleanup_succeeded {
+                self.push_log(
+                    &command.id,
+                    LogStream::System,
+                    "Configured cleanup completed".into(),
+                );
+            }
+        } else if cleanup_succeeded {
+            self.set_status(&command.id, ProcessStatus::Stopped, None, false);
             self.push_log(
                 &command.id,
                 LogStream::System,
@@ -339,7 +420,13 @@ impl RuntimeManager {
         }
     }
 
-    fn set_status(&self, command_id: &str, status: ProcessStatus, exit_code: Option<i32>) {
+    fn set_status(
+        &self,
+        command_id: &str,
+        status: ProcessStatus,
+        exit_code: Option<i32>,
+        managed: bool,
+    ) {
         let mut entries = self.entries.lock().unwrap();
         let started_at = entries.get(command_id).and_then(|entry| entry.started_at);
         entries.insert(
@@ -347,6 +434,7 @@ impl RuntimeManager {
             RuntimeEntry {
                 command_id: command_id.into(),
                 status,
+                managed,
                 exit_code,
                 started_at,
             },
@@ -361,6 +449,73 @@ impl RuntimeManager {
             .unwrap()
             .get(command_id)
             .map(|entry| entry.status)
+    }
+
+    fn is_managed(&self, command_id: &str) -> bool {
+        self.entries
+            .lock()
+            .unwrap()
+            .get(command_id)
+            .is_some_and(|entry| entry.managed)
+    }
+
+    fn set_external_status(&self, command: &HandyCommand, running: bool) {
+        let status = if running {
+            ProcessStatus::Running
+        } else {
+            ProcessStatus::Stopped
+        };
+        let mut entries = self.entries.lock().unwrap();
+        let current = entries.get(&command.id);
+        if current.is_some_and(|entry| {
+            entry.managed
+                && matches!(
+                    entry.status,
+                    ProcessStatus::Starting | ProcessStatus::Stopping
+                )
+        }) || current.is_some_and(|entry| entry.status == status)
+        {
+            return;
+        }
+        let managed = running
+            && current.is_some_and(|entry| entry.managed)
+            && command
+                .stop_command
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty());
+        entries.insert(
+            command.id.clone(),
+            RuntimeEntry {
+                command_id: command.id.clone(),
+                status,
+                managed,
+                exit_code: None,
+                started_at: None,
+            },
+        );
+        drop(entries);
+        self.emit_runtime();
+        self.push_log(
+            &command.id,
+            LogStream::System,
+            if running {
+                "Status check detected a running service"
+            } else {
+                "Status check detected that the service stopped"
+            }
+            .into(),
+        );
+    }
+
+    fn warn_status_once(&self, command: &HandyCommand, warning: String) {
+        if self
+            .status_warnings
+            .lock()
+            .unwrap()
+            .insert(command.id.clone())
+        {
+            self.push_log(&command.id, LogStream::System, warning);
+        }
     }
 
     fn emit_runtime(&self) {
@@ -529,6 +684,7 @@ mod tests {
             command: command.into(),
             cwd: ".".into(),
             stop_command: stop_command.map(str::to_owned),
+            status_command: None,
         }
     }
 
@@ -580,6 +736,75 @@ mod tests {
 
         runtime.stop(&command, &project).await;
         wait_for_status(&runtime, "server", ProcessStatus::Stopped).await;
+    }
+
+    #[tokio::test]
+    async fn detects_external_status_and_skips_duplicate_start() {
+        let runtime = Arc::new(RuntimeManager::with_app(None));
+        let mut project = project();
+        let marker = std::env::temp_dir().join(format!("handy-status-{}", now()));
+        let launched = std::env::temp_dir().join(format!("handy-launched-{}", now()));
+        std::fs::write(&marker, "running").unwrap();
+        let mut command = command("api", &format!("touch '{}'", launched.display()), None);
+        command.status_command = Some(format!("test -f '{}'", marker.display()));
+        project.command_ids = vec![command.id.clone()];
+        let config = Config {
+            schema_version: 1,
+            projects: HashMap::from([(project.id.clone(), project.clone())]),
+            commands: HashMap::from([(command.id.clone(), command.clone())]),
+            groups: HashMap::new(),
+        };
+
+        runtime.refresh_statuses(&config).await;
+        assert_eq!(runtime.status("api"), Some(ProcessStatus::Running));
+        runtime
+            .start(command.clone(), project.clone())
+            .await
+            .unwrap();
+        assert!(!launched.exists());
+
+        std::fs::remove_file(&marker).unwrap();
+        runtime.refresh_statuses(&config).await;
+        assert_eq!(runtime.status("api"), Some(ProcessStatus::Stopped));
+
+        let _ = std::fs::remove_file(launched);
+    }
+
+    #[tokio::test]
+    async fn external_service_is_rechecked_but_not_stopped_on_shutdown() {
+        let runtime = Arc::new(RuntimeManager::with_app(None));
+        let mut project = project();
+        let marker = std::env::temp_dir().join(format!("handy-external-{}", now()));
+        std::fs::write(&marker, "running").unwrap();
+        let mut command = command(
+            "external",
+            "true",
+            Some(&format!("rm '{}'", marker.display())),
+        );
+        command.status_command = Some(format!("test -f '{}'", marker.display()));
+        project.command_ids = vec![command.id.clone()];
+        let config = Config {
+            schema_version: 1,
+            projects: HashMap::from([(project.id.clone(), project.clone())]),
+            commands: HashMap::from([(command.id.clone(), command.clone())]),
+            groups: HashMap::new(),
+        };
+
+        runtime.refresh_statuses(&config).await;
+        let entry = runtime
+            .snapshot()
+            .into_iter()
+            .find(|entry| entry.command_id == command.id)
+            .unwrap();
+        assert_eq!(entry.status, ProcessStatus::Running);
+        assert!(!entry.managed);
+
+        runtime.shutdown(config).await;
+        assert!(marker.exists());
+
+        runtime.stop(&command, &project).await;
+        assert!(!marker.exists());
+        assert_eq!(runtime.status("external"), Some(ProcessStatus::Stopped));
     }
 
     #[tokio::test]

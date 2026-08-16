@@ -12,6 +12,8 @@ pub struct CommandSuggestion {
     source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     stop_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status_command: Option<String>,
 }
 
 pub fn detect(base_dir: &str) -> Result<Vec<CommandSuggestion>, String> {
@@ -36,6 +38,7 @@ pub fn detect(base_dir: &str) -> Result<Vec<CommandSuggestion>, String> {
                 cwd: ".".into(),
                 source: "package.json".into(),
                 stop_command: None,
+                status_command: None,
             }));
         }
     }
@@ -53,10 +56,21 @@ pub fn detect(base_dir: &str) -> Result<Vec<CommandSuggestion>, String> {
                 cwd: ".".into(),
                 source: "Docker Compose".into(),
                 stop_command: Some(format!("docker compose -f {filename} down")),
+                status_command: Some(compose_status_command(filename)),
             });
         }
     }
     Ok(suggestions)
+}
+
+fn compose_status_command(filename: &str) -> String {
+    #[cfg(windows)]
+    return format!(
+        "if (docker compose -f {filename} ps --status running --quiet) {{ exit 0 }} else {{ exit 1 }}"
+    );
+
+    #[cfg(not(windows))]
+    format!("test -n \"$(docker compose -f {filename} ps --status running --quiet)\"")
 }
 
 fn package_manager(root: &Path) -> &'static str {
@@ -68,5 +82,38 @@ fn package_manager(root: &Path) -> &'static str {
         "bun"
     } else {
         "npm"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn compose_suggestion_includes_status_and_stop_commands() {
+        let directory = std::env::temp_dir().join(format!(
+            "handy-detect-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("compose.yaml"), "services: {}\n").unwrap();
+
+        let suggestion = detect(directory.to_str().unwrap()).unwrap().remove(0);
+
+        assert_eq!(
+            suggestion.stop_command.as_deref(),
+            Some("docker compose -f compose.yaml down")
+        );
+        assert!(suggestion
+            .status_command
+            .as_deref()
+            .unwrap()
+            .contains("docker compose -f compose.yaml ps --status running --quiet"));
+        fs::remove_dir_all(directory).unwrap();
     }
 }
