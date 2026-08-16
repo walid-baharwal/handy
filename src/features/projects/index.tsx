@@ -217,6 +217,7 @@ export function ProjectEditor({
         command: suggestion.command,
         cwd: suggestion.cwd,
         stopCommand: suggestion.stopCommand,
+        statusCommand: suggestion.statusCommand,
       },
     ]);
   }
@@ -354,6 +355,19 @@ export function ProjectEditor({
                     placeholder="Optional stop command"
                   />
                 </div>
+                <input
+                  aria-label="Optional status command"
+                  className="mono-input"
+                  value={command.statusCommand ?? ""}
+                  onChange={(event) =>
+                    setCommands(
+                      updateAt(commands, index, {
+                        statusCommand: event.target.value || undefined,
+                      }),
+                    )
+                  }
+                  placeholder="Optional status command (exit 0 = running)"
+                />
               </div>
               <button
                 type="button"

@@ -529,6 +529,7 @@ mod tests {
             command: command.into(),
             cwd: ".".into(),
             stop_command: stop_command.map(str::to_owned),
+            status_command: None,
         }
     }
 

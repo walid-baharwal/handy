@@ -80,6 +80,7 @@ mod desktop {
                     old.command != new.command
                         || old.cwd != new.cwd
                         || old.stop_command != new.stop_command
+                        || old.status_command != new.status_command
                 });
                 if state.runtime.can_stop(old) && (base_dir_changed || execution_changed) {
                     return Err(format!(

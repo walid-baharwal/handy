@@ -19,6 +19,7 @@ export interface HandyCommand {
   command: string;
   cwd: string;
   stopCommand?: string;
+  statusCommand?: string;
 }
 
 export interface Group {
@@ -70,4 +71,5 @@ export interface CommandSuggestion {
   cwd: string;
   source: string;
   stopCommand?: string;
+  statusCommand?: string;
 }
