@@ -2,7 +2,7 @@ import { Fragment, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../../api";
 import { Empty, Glyph, Modal, PageHeader, Status } from "../../components/ui";
-import { aggregateStatus, canStop, type CommonViewProps } from "../../lib/runtime";
+import { aggregateStatus, canStop, isLive, type CommonViewProps } from "../../lib/runtime";
 import type { CommandSuggestion, Config, HandyCommand, Project } from "../../types";
 
 export function ProjectsView(
@@ -52,8 +52,21 @@ export function ProjectsView(
                   commands.map((command) => props.runtime[command.id]?.status),
                 );
                 const canStopStack = commands.some((command) =>
-                  canStop(props.runtime[command.id]?.status, command.stopCommand),
+                  canStop(
+                    props.runtime[command.id]?.status,
+                    command.stopCommand,
+                    props.runtime[command.id]?.managed,
+                  ),
                 );
+                const allRunningExternally =
+                  commands.length > 0 &&
+                  commands.every((command) => {
+                    const entry = props.runtime[command.id];
+                    return (
+                      isLive(entry?.status) &&
+                      !canStop(entry?.status, command.stopCommand, entry?.managed)
+                    );
+                  });
                 return (
                   <Fragment key={project.id}>
                     <tr className={`table-parent-row tone-${index % 4}`}>
@@ -94,6 +107,8 @@ export function ProjectsView(
                           >
                             Stop stack
                           </button>
+                        ) : allRunningExternally ? (
+                          <button disabled>Running externally</button>
                         ) : (
                           <button
                             className="primary compact"
@@ -116,7 +131,9 @@ export function ProjectsView(
                       </tr>
                     ) : (
                       commands.map((command) => {
-                        const status = props.runtime[command.id]?.status ?? "stopped";
+                        const entry = props.runtime[command.id];
+                        const status = entry?.status ?? "stopped";
+                        const stoppable = canStop(status, command.stopCommand, entry?.managed);
                         return (
                           <tr className="table-child-row" key={command.id}>
                             <td>
@@ -138,13 +155,15 @@ export function ProjectsView(
                               <button title="View logs" onClick={() => props.onLogs(command.id)}>
                                 Logs
                               </button>
-                              {canStop(status, command.stopCommand) ? (
+                              {stoppable ? (
                                 <button
                                   className="stop"
                                   onClick={() => props.onStop({ kind: "command", id: command.id })}
                                 >
                                   Stop
                                 </button>
+                              ) : isLive(status) ? (
+                                <button disabled>Running externally</button>
                               ) : (
                                 <button
                                   onClick={() => props.onRun({ kind: "command", id: command.id })}

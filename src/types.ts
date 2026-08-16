@@ -46,6 +46,7 @@ export type ProcessStatus =
 export interface RuntimeEntry {
   commandId: string;
   status: ProcessStatus;
+  managed: boolean;
   exitCode?: number;
   startedAt?: number;
 }

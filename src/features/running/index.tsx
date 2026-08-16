@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { PageHeader } from "../../components/ui";
-import { canStop, type CommonViewProps } from "../../lib/runtime";
+import { canStop, isLive, type CommonViewProps } from "../../lib/runtime";
 import type { LogEntry } from "../../types";
 
 export function RunningView(
@@ -24,6 +24,13 @@ export function RunningView(
       (!search || log.text.toLowerCase().includes(search.toLowerCase())),
   );
   const lastVisibleSequence = visibleLogs.at(-1)?.sequence;
+  const selectedEntry = props.selected ? props.runtime[props.selected] : undefined;
+  const selectedCommand = props.selected ? props.config.commands[props.selected] : undefined;
+  const selectedCanStop = canStop(
+    selectedEntry?.status,
+    selectedCommand?.stopCommand,
+    selectedEntry?.managed,
+  );
 
   useLayoutEffect(() => {
     followLogs.current = true;
@@ -82,16 +89,15 @@ export function RunningView(
             <span>{visibleLogs.length} lines</span>
             <button onClick={props.onClear}>Clear</button>
             {props.selected &&
-              (canStop(
-                props.runtime[props.selected]?.status,
-                props.config.commands[props.selected]?.stopCommand,
-              ) ? (
+              (selectedCanStop ? (
                 <button
                   className="stop"
                   onClick={() => props.onStop({ kind: "command", id: props.selected! })}
                 >
                   Stop
                 </button>
+              ) : isLive(selectedEntry?.status) ? (
+                <button disabled>Running externally</button>
               ) : (
                 <button onClick={() => props.onRun({ kind: "command", id: props.selected! })}>
                   Run

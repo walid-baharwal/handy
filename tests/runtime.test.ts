@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendBoundedLogs, mergeLogs } from "../src/lib/runtime.ts";
+import { appendBoundedLogs, canStop, mergeLogs } from "../src/lib/runtime.ts";
 import type { LogEntry } from "../src/types.ts";
 
 function log(sequence: number, text: string): LogEntry {
@@ -26,4 +26,10 @@ test("snapshot and pending logs merge once in sequence order", () => {
     mergeLogs([log(1, "first"), log(2, "duplicate")], [log(2, "second"), log(3, "last")]),
     [log(1, "first"), log(2, "second"), log(3, "last")],
   );
+});
+
+test("external services require a stop command", () => {
+  assert.equal(canStop("running", undefined, false), false);
+  assert.equal(canStop("running", "docker compose down", false), true);
+  assert.equal(canStop("running", undefined, true), true);
 });

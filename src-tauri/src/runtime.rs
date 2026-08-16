@@ -111,15 +111,23 @@ impl RuntimeManager {
     }
 
     pub fn can_stop(&self, command: &HandyCommand) -> bool {
-        let status = self.status(&command.id);
-        matches!(
-            status,
-            Some(ProcessStatus::Starting | ProcessStatus::Running | ProcessStatus::Stopping)
-        ) || (status == Some(ProcessStatus::Completed)
-            && command
-                .stop_command
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty()))
+        let entry = self
+            .entries
+            .lock()
+            .unwrap()
+            .get(&command.id)
+            .cloned();
+        let has_stop_command = command
+            .stop_command
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+        entry.is_some_and(|entry| {
+            (matches!(
+                entry.status,
+                ProcessStatus::Starting | ProcessStatus::Running | ProcessStatus::Stopping
+            ) && (entry.managed || has_stop_command))
+                || (entry.status == ProcessStatus::Completed && has_stop_command)
+        })
     }
 
     pub async fn shutdown(self: &Arc<Self>, config: Config) {
@@ -354,6 +362,7 @@ impl RuntimeManager {
         if sender.is_none() && stop_command.is_none() {
             return;
         }
+        let mut cleanup_succeeded = true;
         if let Some(stop_command) = stop_command {
             self.push_log(
                 &command.id,
@@ -369,6 +378,7 @@ impl RuntimeManager {
                     self.push_cleanup_output(&command.id, LogStream::Stdout, output.stdout);
                     self.push_cleanup_output(&command.id, LogStream::Stderr, output.stderr);
                     if !output.status.success() {
+                        cleanup_succeeded = false;
                         self.push_log(
                             &command.id,
                             LogStream::System,
@@ -376,21 +386,36 @@ impl RuntimeManager {
                         );
                     }
                 }
-                Ok(Err(_)) => self.push_log(
-                    &command.id,
-                    LogStream::System,
-                    "Could not start the configured stop command".into(),
-                ),
-                Err(_) => self.push_log(
-                    &command.id,
-                    LogStream::System,
-                    "Configured stop command timed out".into(),
-                ),
+                Ok(Err(_)) => {
+                    cleanup_succeeded = false;
+                    self.push_log(
+                        &command.id,
+                        LogStream::System,
+                        "Could not start the configured stop command".into(),
+                    );
+                }
+                Err(_) => {
+                    cleanup_succeeded = false;
+                    self.push_log(
+                        &command.id,
+                        LogStream::System,
+                        "Configured stop command timed out".into(),
+                    );
+                }
             }
         }
         if let Some(sender) = sender {
             let _ = sender.send(()).await;
-        } else {
+        } else if command.status_command.is_some() {
+            self.refresh_status(command, project).await;
+            if cleanup_succeeded {
+                self.push_log(
+                    &command.id,
+                    LogStream::System,
+                    "Configured cleanup completed".into(),
+                );
+            }
+        } else if cleanup_succeeded {
             self.set_status(&command.id, ProcessStatus::Stopped, None, false);
             self.push_log(
                 &command.id,
@@ -748,6 +773,43 @@ mod tests {
         assert_eq!(runtime.status("api"), Some(ProcessStatus::Stopped));
 
         let _ = std::fs::remove_file(launched);
+    }
+
+    #[tokio::test]
+    async fn external_service_is_rechecked_but_not_stopped_on_shutdown() {
+        let runtime = Arc::new(RuntimeManager::with_app(None));
+        let mut project = project();
+        let marker = std::env::temp_dir().join(format!("handy-external-{}", now()));
+        std::fs::write(&marker, "running").unwrap();
+        let mut command = command(
+            "external",
+            "true",
+            Some(&format!("rm '{}'", marker.display())),
+        );
+        command.status_command = Some(format!("test -f '{}'", marker.display()));
+        project.command_ids = vec![command.id.clone()];
+        let config = Config {
+            schema_version: 1,
+            projects: HashMap::from([(project.id.clone(), project.clone())]),
+            commands: HashMap::from([(command.id.clone(), command.clone())]),
+            groups: HashMap::new(),
+        };
+
+        runtime.refresh_statuses(&config).await;
+        let entry = runtime
+            .snapshot()
+            .into_iter()
+            .find(|entry| entry.command_id == command.id)
+            .unwrap();
+        assert_eq!(entry.status, ProcessStatus::Running);
+        assert!(!entry.managed);
+
+        runtime.shutdown(config).await;
+        assert!(marker.exists());
+
+        runtime.stop(&command, &project).await;
+        assert!(!marker.exists());
+        assert_eq!(runtime.status("external"), Some(ProcessStatus::Stopped));
     }
 
     #[tokio::test]

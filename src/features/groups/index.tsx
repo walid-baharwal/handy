@@ -4,6 +4,7 @@ import {
   aggregateStatus,
   canStop,
   describeTargets,
+  isLive,
   resolveGroup,
   type CommonViewProps,
 } from "../../lib/runtime";
@@ -51,8 +52,25 @@ export function GroupsView(
                 const ids = resolveGroup(group.id, props.config);
                 const states = ids.map((id) => props.runtime[id]?.status);
                 const active = ids.some((id) =>
-                  canStop(props.runtime[id]?.status, props.config.commands[id]?.stopCommand),
+                  canStop(
+                    props.runtime[id]?.status,
+                    props.config.commands[id]?.stopCommand,
+                    props.runtime[id]?.managed,
+                  ),
                 );
+                const allRunningExternally =
+                  ids.length > 0 &&
+                  ids.every((id) => {
+                    const entry = props.runtime[id];
+                    return (
+                      isLive(entry?.status) &&
+                      !canStop(
+                        entry?.status,
+                        props.config.commands[id]?.stopCommand,
+                        entry?.managed,
+                      )
+                    );
+                  });
                 return (
                   <Fragment key={group.id}>
                     <tr className="table-parent-row recipe-parent-row">
@@ -93,6 +111,8 @@ export function GroupsView(
                           >
                             Stop
                           </button>
+                        ) : allRunningExternally ? (
+                          <button disabled>Running externally</button>
                         ) : (
                           <button
                             className="primary compact"
