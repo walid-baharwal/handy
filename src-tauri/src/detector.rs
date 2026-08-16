@@ -70,9 +70,7 @@ fn compose_status_command(filename: &str) -> String {
     );
 
     #[cfg(not(windows))]
-    format!(
-        "test -n \"$(docker compose -f {filename} ps --status running --quiet)\""
-    )
+    format!("test -n \"$(docker compose -f {filename} ps --status running --quiet)\"")
 }
 
 fn package_manager(root: &Path) -> &'static str {
