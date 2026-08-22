@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PageHeader } from "../../components/ui";
-import { canStop, isLive, type CommonViewProps } from "../../lib/runtime";
+import { aggregateStatus, canStop, isLive, type CommonViewProps } from "../../lib/runtime";
 import type { LogEntry } from "../../types";
 
 export function RunningView(
@@ -16,6 +16,7 @@ export function RunningView(
   const [copyLabel, setCopyLabel] = useState("Copy");
   const consoleRef = useRef<HTMLDivElement>(null);
   const followLogs = useRef(true);
+  const copyTimer = useRef<number | undefined>(undefined);
   const commands = Object.values(props.config.commands).filter(
     (command) =>
       props.runtime[command.id] || props.logs.some((log) => log.commandId === command.id),
@@ -33,6 +34,9 @@ export function RunningView(
     selectedCommand?.stopCommand,
     selectedEntry?.managed,
   );
+  const allStatus = aggregateStatus(commands.map((command) => props.runtime[command.id]?.status))
+    .toLowerCase()
+    .replace(" ", "-");
   const followLatest = () => {
     followLogs.current = true;
     setIsFollowing(true);
@@ -53,8 +57,11 @@ export function RunningView(
     } catch {
       setCopyLabel("Copy failed");
     }
-    window.setTimeout(() => setCopyLabel("Copy"), 1400);
+    window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setCopyLabel("Copy"), 1400);
   };
+
+  useEffect(() => () => window.clearTimeout(copyTimer.current), []);
 
   useLayoutEffect(() => {
     followLatest();
@@ -78,7 +85,7 @@ export function RunningView(
             className={!props.selected ? "selected" : ""}
             onClick={() => props.onSelect(null)}
           >
-            <span className="service-light running" />
+            <span className={`service-light ${allStatus}`} />
             <div>
               <strong>All services</strong>
               <small>{commands.length} visible</small>
@@ -115,7 +122,9 @@ export function RunningView(
             <button disabled={visibleLogs.length === 0} onClick={copyVisibleLogs}>
               {copyLabel}
             </button>
-            <button onClick={props.onClear}>Clear</button>
+            <button disabled={visibleLogs.length === 0} onClick={props.onClear}>
+              Clear
+            </button>
             {props.selected &&
               (selectedCanStop ? (
                 <button
