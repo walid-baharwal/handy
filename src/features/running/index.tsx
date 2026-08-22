@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { PageHeader } from "../../components/ui";
-import { canStop, isLive, type CommonViewProps } from "../../lib/runtime";
+import { aggregateStatus, canStop, isLive, type CommonViewProps } from "../../lib/runtime";
 import type { LogEntry } from "../../types";
 
 export function RunningView(
@@ -33,6 +33,9 @@ export function RunningView(
     selectedCommand?.stopCommand,
     selectedEntry?.managed,
   );
+  const allStatus = aggregateStatus(commands.map((command) => props.runtime[command.id]?.status))
+    .toLowerCase()
+    .replace(" ", "-");
   const followLatest = () => {
     followLogs.current = true;
     setIsFollowing(true);
@@ -78,7 +81,7 @@ export function RunningView(
             className={!props.selected ? "selected" : ""}
             onClick={() => props.onSelect(null)}
           >
-            <span className="service-light running" />
+            <span className={`service-light ${allStatus}`} />
             <div>
               <strong>All services</strong>
               <small>{commands.length} visible</small>
