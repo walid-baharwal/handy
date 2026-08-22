@@ -12,6 +12,7 @@ export function RunningView(
   },
 ) {
   const [search, setSearch] = useState("");
+  const [isFollowing, setIsFollowing] = useState(true);
   const consoleRef = useRef<HTMLDivElement>(null);
   const followLogs = useRef(true);
   const commands = Object.values(props.config.commands).filter(
@@ -31,11 +32,15 @@ export function RunningView(
     selectedCommand?.stopCommand,
     selectedEntry?.managed,
   );
-
-  useLayoutEffect(() => {
+  const followLatest = () => {
     followLogs.current = true;
+    setIsFollowing(true);
     const console = consoleRef.current;
     if (console) console.scrollTop = console.scrollHeight;
+  };
+
+  useLayoutEffect(() => {
+    followLatest();
   }, [props.selected, search]);
 
   useLayoutEffect(() => {
@@ -87,6 +92,9 @@ export function RunningView(
               placeholder="Search session logs…"
             />
             <span>{visibleLogs.length} lines</span>
+            <button disabled={isFollowing} onClick={followLatest}>
+              {isFollowing ? "Following" : "Paused"}
+            </button>
             <button onClick={props.onClear}>Clear</button>
             {props.selected &&
               (selectedCanStop ? (
@@ -109,8 +117,9 @@ export function RunningView(
             ref={consoleRef}
             onScroll={(event) => {
               const console = event.currentTarget;
-              followLogs.current =
-                console.scrollHeight - console.scrollTop - console.clientHeight <= 24;
+              const next = console.scrollHeight - console.scrollTop - console.clientHeight <= 24;
+              followLogs.current = next;
+              setIsFollowing((current) => (current === next ? current : next));
             }}
           >
             {visibleLogs.length === 0 ? (
