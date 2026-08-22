@@ -125,7 +125,7 @@ export function RunningView(
                   Stop
                 </button>
               ) : isLive(selectedEntry?.status) ? (
-                <button disabled>Running externally</button>
+                <button disabled>Running outside Handy</button>
               ) : (
                 <button onClick={() => props.onRun({ kind: "command", id: props.selected! })}>
                   Run

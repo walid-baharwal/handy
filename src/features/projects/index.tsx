@@ -108,7 +108,7 @@ export function ProjectsView(
                             Stop stack
                           </button>
                         ) : allRunningExternally ? (
-                          <button disabled>Running externally</button>
+                          <button disabled>Running outside Handy</button>
                         ) : (
                           <button
                             className="primary compact"
@@ -163,7 +163,7 @@ export function ProjectsView(
                                   Stop
                                 </button>
                               ) : isLive(status) ? (
-                                <button disabled>Running externally</button>
+                                <button disabled>Running outside Handy</button>
                               ) : (
                                 <button
                                   onClick={() => props.onRun({ kind: "command", id: command.id })}
