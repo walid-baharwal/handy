@@ -122,7 +122,9 @@ export function RunningView(
             <button disabled={visibleLogs.length === 0} onClick={copyVisibleLogs}>
               {copyLabel}
             </button>
-            <button onClick={props.onClear}>Clear</button>
+            <button disabled={visibleLogs.length === 0} onClick={props.onClear}>
+              Clear
+            </button>
             {props.selected &&
               (selectedCanStop ? (
                 <button
