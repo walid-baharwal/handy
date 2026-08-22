@@ -112,7 +112,7 @@ export function GroupsView(
                             Stop
                           </button>
                         ) : allRunningExternally ? (
-                          <button disabled>Running externally</button>
+                          <button disabled>Running outside Handy</button>
                         ) : (
                           <button
                             className="primary compact"
