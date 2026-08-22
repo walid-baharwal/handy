@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PageHeader } from "../../components/ui";
 import { aggregateStatus, canStop, isLive, type CommonViewProps } from "../../lib/runtime";
 import type { LogEntry } from "../../types";
@@ -16,6 +16,7 @@ export function RunningView(
   const [copyLabel, setCopyLabel] = useState("Copy");
   const consoleRef = useRef<HTMLDivElement>(null);
   const followLogs = useRef(true);
+  const copyTimer = useRef<number | undefined>(undefined);
   const commands = Object.values(props.config.commands).filter(
     (command) =>
       props.runtime[command.id] || props.logs.some((log) => log.commandId === command.id),
@@ -56,8 +57,11 @@ export function RunningView(
     } catch {
       setCopyLabel("Copy failed");
     }
-    window.setTimeout(() => setCopyLabel("Copy"), 1400);
+    window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setCopyLabel("Copy"), 1400);
   };
+
+  useEffect(() => () => window.clearTimeout(copyTimer.current), []);
 
   useLayoutEffect(() => {
     followLatest();
