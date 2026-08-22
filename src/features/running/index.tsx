@@ -13,6 +13,7 @@ export function RunningView(
 ) {
   const [search, setSearch] = useState("");
   const [isFollowing, setIsFollowing] = useState(true);
+  const [copyLabel, setCopyLabel] = useState("Copy");
   const consoleRef = useRef<HTMLDivElement>(null);
   const followLogs = useRef(true);
   const commands = Object.values(props.config.commands).filter(
@@ -37,6 +38,22 @@ export function RunningView(
     setIsFollowing(true);
     const console = consoleRef.current;
     if (console) console.scrollTop = console.scrollHeight;
+  };
+  const copyVisibleLogs = async () => {
+    const text = visibleLogs
+      .map((log) => {
+        const time = new Date(log.timestamp).toLocaleTimeString();
+        const service = props.config.commands[log.commandId]?.name ?? log.commandId;
+        return `[${time}] [${service}] ${log.text}`;
+      })
+      .join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyLabel("Copied");
+    } catch {
+      setCopyLabel("Copy failed");
+    }
+    window.setTimeout(() => setCopyLabel("Copy"), 1400);
   };
 
   useLayoutEffect(() => {
@@ -94,6 +111,9 @@ export function RunningView(
             <span>{visibleLogs.length} lines</span>
             <button disabled={isFollowing} onClick={followLatest}>
               {isFollowing ? "Following" : "Paused"}
+            </button>
+            <button disabled={visibleLogs.length === 0} onClick={copyVisibleLogs}>
+              {copyLabel}
             </button>
             <button onClick={props.onClear}>Clear</button>
             {props.selected &&
