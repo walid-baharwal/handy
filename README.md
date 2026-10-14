@@ -45,10 +45,11 @@ Checks:
 ```sh
 pnpm build
 cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
-cargo test --manifest-path src-tauri/Cargo.toml
+pnpm test
 ```
 
 The `--no-default-features` test runs the portable configuration and graph tests without linking the OS desktop libraries.
+On Windows, `pnpm test` adds a Common Controls manifest to Cargo's test executables before running them. Tauri supplies the shipped app's manifest during its normal build.
 
 ## Linux installers
 

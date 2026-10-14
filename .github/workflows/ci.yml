@@ -48,5 +48,5 @@ jobs:
       - run: pnpm build
       - run: pnpm test:frontend
       - run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: pnpm test
       - run: pnpm tauri build --bundles ${{ matrix.bundles }}
