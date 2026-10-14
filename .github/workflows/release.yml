@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 jobs:
   build:
@@ -120,6 +121,7 @@ jobs:
 
   draft-release:
     name: Create verified draft release
+    if: github.event_name == 'push'
     needs: [build, fedora-install, arch-appimage]
     runs-on: ubuntu-22.04
     permissions:
