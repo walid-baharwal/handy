@@ -1,0 +1,2 @@
+[target.x86_64-pc-windows-msvc]
+runner = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".cargo/run-test.ps1"]

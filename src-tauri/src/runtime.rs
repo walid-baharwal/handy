@@ -612,7 +612,14 @@ fn shell_command(script: &str, cwd: PathBuf) -> tokio::process::Command {
     #[cfg(unix)]
     let mut command = {
         use std::os::unix::process::CommandExt;
-        let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
+        let default_shell = if cfg!(target_os = "macos") {
+            "/bin/zsh"
+        } else {
+            "/bin/sh"
+        };
+        let shell = std::env::var_os("SHELL")
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| default_shell.into());
         let mut command = std::process::Command::new(shell);
         command.args(["-lc", script]).process_group(0);
         command
@@ -667,6 +674,105 @@ fn now() -> u64 {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn long_running() -> &'static str {
+        "sleep 30"
+    }
+
+    #[cfg(windows)]
+    fn long_running() -> &'static str {
+        "Start-Sleep -Seconds 30"
+    }
+
+    #[cfg(unix)]
+    fn output_and_wait() -> &'static str {
+        "printf 'stdout\\n'; printf 'stderr\\n' >&2; sleep 30"
+    }
+
+    #[cfg(windows)]
+    fn output_and_wait() -> &'static str {
+        "Write-Output 'stdout'; [Console]::Error.WriteLine('stderr'); Start-Sleep -Seconds 30"
+    }
+
+    #[cfg(unix)]
+    fn create_marker(path: &std::path::Path) -> String {
+        format!("touch '{}'", path.display())
+    }
+
+    #[cfg(windows)]
+    fn create_marker(path: &std::path::Path) -> String {
+        format!(
+            "New-Item -ItemType File -Path '{}' -Force | Out-Null",
+            path.display()
+        )
+    }
+
+    #[cfg(unix)]
+    fn remove_marker(path: &std::path::Path) -> String {
+        format!("rm '{}'", path.display())
+    }
+
+    #[cfg(windows)]
+    fn remove_marker(path: &std::path::Path) -> String {
+        format!("Remove-Item -Path '{}'", path.display())
+    }
+
+    #[cfg(unix)]
+    fn marker_status(path: &std::path::Path) -> String {
+        format!("test -f '{}'", path.display())
+    }
+
+    #[cfg(windows)]
+    fn marker_status(path: &std::path::Path) -> String {
+        format!(
+            "if (Test-Path -Path '{}') {{ exit 0 }} else {{ exit 1 }}",
+            path.display()
+        )
+    }
+
+    #[cfg(unix)]
+    fn wait_for_marker(path: &std::path::Path) -> String {
+        format!("while [ ! -f '{}' ]; do sleep 0.05; done", path.display())
+    }
+
+    #[cfg(windows)]
+    fn wait_for_marker(path: &std::path::Path) -> String {
+        format!(
+            "while (-not (Test-Path -Path '{}')) {{ Start-Sleep -Milliseconds 50 }}",
+            path.display()
+        )
+    }
+
+    #[cfg(unix)]
+    fn create_marker_then_wait(path: &std::path::Path) -> String {
+        format!("{}; sleep 0.2", create_marker(path))
+    }
+
+    #[cfg(windows)]
+    fn create_marker_then_wait(path: &std::path::Path) -> String {
+        format!("{}; Start-Sleep -Milliseconds 200", create_marker(path))
+    }
+
+    #[cfg(unix)]
+    fn completed_command() -> &'static str {
+        "true"
+    }
+
+    #[cfg(windows)]
+    fn completed_command() -> &'static str {
+        "exit 0"
+    }
+
+    #[cfg(unix)]
+    fn cleanup_output() -> &'static str {
+        "printf 'cleanup\\n'"
+    }
+
+    #[cfg(windows)]
+    fn cleanup_output() -> &'static str {
+        "Write-Output 'cleanup'"
+    }
+
     fn project() -> Project {
         Project {
             id: "project".into(),
@@ -689,7 +795,7 @@ mod tests {
     }
 
     async fn wait_for_status(runtime: &RuntimeManager, id: &str, status: ProcessStatus) {
-        for _ in 0..100 {
+        for _ in 0..200 {
             if runtime
                 .snapshot()
                 .iter()
@@ -697,13 +803,13 @@ mod tests {
             {
                 return;
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
         panic!("{id} did not reach {status:?}");
     }
 
     async fn wait_for_log(runtime: &RuntimeManager, text: &str) {
-        for _ in 0..100 {
+        for _ in 0..200 {
             if runtime
                 .log_snapshot()
                 .iter()
@@ -711,7 +817,7 @@ mod tests {
             {
                 return;
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
         panic!("log entry {text:?} was not captured");
     }
@@ -720,11 +826,7 @@ mod tests {
     async fn starts_stops_and_captures_both_log_streams() {
         let runtime = Arc::new(RuntimeManager::with_app(None));
         let project = project();
-        let command = command(
-            "server",
-            "printf 'stdout\\n'; printf 'stderr\\n' >&2; sleep 30",
-            None,
-        );
+        let command = command("server", output_and_wait(), None);
 
         runtime
             .start(command.clone(), project.clone())
@@ -745,8 +847,8 @@ mod tests {
         let marker = std::env::temp_dir().join(format!("handy-status-{}", now()));
         let launched = std::env::temp_dir().join(format!("handy-launched-{}", now()));
         std::fs::write(&marker, "running").unwrap();
-        let mut command = command("api", &format!("touch '{}'", launched.display()), None);
-        command.status_command = Some(format!("test -f '{}'", marker.display()));
+        let mut command = command("api", &create_marker(&launched), None);
+        command.status_command = Some(marker_status(&marker));
         project.command_ids = vec![command.id.clone()];
         let config = Config {
             schema_version: 1,
@@ -778,10 +880,10 @@ mod tests {
         std::fs::write(&marker, "running").unwrap();
         let mut command = command(
             "external",
-            "true",
-            Some(&format!("rm '{}'", marker.display())),
+            completed_command(),
+            Some(&remove_marker(&marker)),
         );
-        command.status_command = Some(format!("test -f '{}'", marker.display()));
+        command.status_command = Some(marker_status(&marker));
         project.command_ids = vec![command.id.clone()];
         let config = Config {
             schema_version: 1,
@@ -811,7 +913,7 @@ mod tests {
     async fn completed_command_runs_its_configured_cleanup() {
         let runtime = Arc::new(RuntimeManager::with_app(None));
         let project = project();
-        let command = command("database", "true", Some("printf 'cleanup\\n'"));
+        let command = command("database", completed_command(), Some(cleanup_output()));
 
         runtime
             .start(command.clone(), project.clone())
@@ -832,8 +934,8 @@ mod tests {
         let marker = std::env::temp_dir().join(format!("handy-stop-{}", now()));
         let command = command(
             "database",
-            &format!("while [ ! -f '{}' ]; do sleep 0.05; done", marker.display()),
-            Some(&format!("touch '{}'; sleep 0.2", marker.display())),
+            &wait_for_marker(&marker),
+            Some(&create_marker_then_wait(&marker)),
         );
 
         runtime
@@ -863,7 +965,7 @@ mod tests {
     async fn recipe_start_and_stop_preserves_shared_command_ownership() {
         let runtime = Arc::new(RuntimeManager::with_app(None));
         let project = project();
-        let command = command("api", "sleep 30", None);
+        let command = command("api", long_running(), None);
         let first = TargetRef {
             kind: TargetKind::Group,
             id: "first".into(),
@@ -895,8 +997,8 @@ mod tests {
     async fn shutdown_stops_every_running_command() {
         let runtime = Arc::new(RuntimeManager::with_app(None));
         let mut project = project();
-        let first = command("api", "sleep 30", None);
-        let second = command("worker", "sleep 30", None);
+        let first = command("api", long_running(), None);
+        let second = command("worker", long_running(), None);
         project.command_ids = vec![first.id.clone(), second.id.clone()];
 
         runtime.start(first.clone(), project.clone()).await.unwrap();

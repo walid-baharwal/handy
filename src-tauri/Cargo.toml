@@ -12,12 +12,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 default = ["desktop"]
-desktop = ["dep:libc", "dep:serde_json", "dep:tauri", "dep:tauri-plugin-dialog", "dep:tokio"]
+desktop = ["dep:fix-path-env", "dep:libc", "dep:serde_json", "dep:tauri", "dep:tauri-plugin-dialog", "dep:tokio"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs", rev = "c4c45d503ea115a839aae718d02f79e7c7f0f673", optional = true }
 libc = { version = "0.2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", optional = true }
