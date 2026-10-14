@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/handy-dmg"
-          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/handy-dmg" release-files/*.dmg
+          printf 'Y\n' | hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/handy-dmg" release-files/*.dmg
           trap 'hdiutil detach "$RUNNER_TEMP/handy-dmg"' EXIT
           codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/handy-dmg/Handy.app"
 
