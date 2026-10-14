@@ -1,2 +1,2 @@
 [target.x86_64-pc-windows-msvc]
-runner = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "src-tauri/.cargo/run-test.ps1"]
+runner = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".cargo/run-test.ps1"]
