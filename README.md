@@ -94,7 +94,7 @@ For widest Linux compatibility, build on an older supported base such as Ubuntu 
 
 ## GitHub releases
 
-A `v<version>` tag builds Linux x64 DEB, RPM, and AppImage files, a Windows x64 setup EXE, and DMGs for Intel and Apple Silicon Macs. The release workflow checks package contents, installs the DEB on Ubuntu and the RPM on Fedora, extracts the AppImage on Arch, and creates a draft GitHub release with checksums. Check the installers on real desktops before publishing the draft.
+A `v<version>` tag builds Linux x64 DEB, RPM, and AppImage files, a Windows x64 setup EXE, and DMGs for Intel and Apple Silicon Macs. The release workflow checks package contents, installs the DEB on Ubuntu and the RPM on Fedora, extracts the AppImage on Arch, and creates a draft GitHub release with checksums. You can also run the release workflow manually from a branch to check the packages without creating a release. Check the installers on real desktops before publishing the draft.
 
 The Windows installer may show a Microsoft SmartScreen warning because it has no code signing certificate. The macOS DMGs use ad hoc signing, so macOS may ask you to approve Handy in Privacy & Security. Follow the [Apple instructions for opening an unverified app](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac). A trusted public release needs an Apple Developer certificate and notarization, and a Windows signing certificate.
 
