@@ -4,47 +4,146 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 jobs:
-  linux:
-    name: Build Linux packages
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            platform: ubuntu-22.04
+            bundles: deb,rpm,appimage
+            expected: 3
+          - name: windows-x64
+            platform: windows-2022
+            bundles: nsis
+            expected: 1
+          - name: macos-intel
+            platform: macos-15-intel
+            bundles: dmg
+            expected: 1
+          - name: macos-apple-silicon
+            platform: macos-15
+            bundles: dmg
+            expected: 1
+    runs-on: ${{ matrix.platform }}
+    env:
+      APPLE_SIGNING_IDENTITY: "-"
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
-
+          version: 10.33.2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libdbus-1-dev pkg-config patchelf rpm libfuse2
 
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm test:frontend
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: pnpm tauri build --bundles ${{ matrix.bundles }}
 
-      - name: Build and publish release assets
-        uses: tauri-apps/tauri-action@v1
+      - name: Collect and check installers
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED: ${{ matrix.expected }}
+        run: |
+          mkdir release-files
+          find src-tauri/target/release/bundle -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*-setup.exe' -o -name '*.dmg' \) -exec cp {} release-files/ \;
+          test "$(find release-files -type f | wc -l)" -eq "$EXPECTED"
+          ls -lh release-files
+
+      - name: Inspect Linux packages and install DEB
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          dpkg-deb --info release-files/*.deb
+          dpkg-deb --contents release-files/*.deb | head -40
+          rpm -qpR release-files/*.rpm
+          rpm -qpl release-files/*.rpm | head -40
+          sudo apt-get install -y ./release-files/*.deb
+
+      - name: Verify macOS ad hoc signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          codesign --verify --deep --strict --verbose=2 src-tauri/target/release/bundle/macos/Handy.app
+
+      - uses: actions/upload-artifact@v4
         with:
-          tauriScript: pnpm tauri
-          tagName: ${{ github.ref_name }}
-          releaseName: Handy ${{ github.ref_name }}
-          releaseBody: See the attached .deb and .rpm installers.
-          generateReleaseNotes: true
-          releaseDraft: false
-          prerelease: false
-          args: --bundles deb,rpm
+          name: handy-${{ matrix.name }}
+          path: release-files/*
+          if-no-files-found: error
+
+  fedora-install:
+    name: Install RPM on Fedora
+    needs: build
+    runs-on: ubuntu-22.04
+    container: fedora:44
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: handy-linux-x64
+          path: release-files
+      - run: dnf install -y ./release-files/*.rpm
+
+  arch-appimage:
+    name: Inspect AppImage on Arch
+    needs: build
+    runs-on: ubuntu-22.04
+    container: archlinux:base
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: handy-linux-x64
+          path: release-files
+      - name: Extract AppImage
+        run: |
+          chmod +x release-files/*.AppImage
+          release-files/*.AppImage --appimage-extract
+          test -f squashfs-root/AppRun
+
+  draft-release:
+    name: Create verified draft release
+    needs: [build, fedora-install, arch-appimage]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: handy-*
+          path: release-files
+          merge-multiple: true
+      - name: Check tag and publish draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          test "$(find release-files -type f | wc -l)" -eq 6
+          cd release-files
+          sha256sum * > SHA256SUMS
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = true
+            gh release upload "$GITHUB_REF_NAME" ./* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" ./* --draft --title "Handy $GITHUB_REF_NAME" --generate-notes
+          fi

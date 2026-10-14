@@ -16,7 +16,7 @@ This first implementation includes:
 
 ## Development
 
-Requirements: Node.js 22+, pnpm 10+, Rust, and the [Tauri 2 system prerequisites](https://v2.tauri.app/start/prerequisites/).
+Requirements: Node.js 22+, pnpm 10+, Rust with `rustfmt`, and the [Tauri 2 system prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 On Ubuntu/Debian, install the native packages once:
 
@@ -35,8 +35,10 @@ pnpm tauri dev
 On Fedora / Red Hat style systems, install the native packages once:
 
 ```sh
-sudo dnf install webkit2gtk4.1-devel gcc-c++ curl wget file openssl-devel libappindicator-gtk3-devel librsvg2-devel xdotool dbus-devel
+sudo dnf install webkit2gtk4.1-devel gtk3-devel gcc gcc-c++ make curl wget file openssl-devel libappindicator-gtk3-devel librsvg2-devel libxdo-devel dbus-devel pkgconf-pkg-config rustfmt
 ```
+
+On Arch, install the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) with `pacman` before running the same development commands. If you installed Rust with `rustup`, run `rustup component add rustfmt` when `cargo fmt` is missing.
 
 Checks:
 
@@ -50,9 +52,9 @@ The `--no-default-features` test runs the portable configuration and graph tests
 
 ## Linux installers
 
-Handy can be packaged as native Linux installers with Tauri.
+Handy can be packaged as native Linux installers and an AppImage with Tauri. Use the DEB on Debian or Ubuntu, the RPM on Fedora and compatible systems, and the AppImage on Arch or other distributions. The AppImage needs a compatible glibc and desktop libraries; it does not guarantee support for every Linux system.
 
-Build both Linux package formats:
+Build the Linux packages and AppImage:
 
 ```sh
 pnpm bundle
@@ -73,16 +75,29 @@ pnpm bundle:rpm
 The generated installers are written under `src-tauri/target/release/bundle/`, including:
 
 - `deb/` for Debian and Ubuntu
-- `rpm/` for Fedora, RHEL, Rocky, AlmaLinux, and similar distributions
+- `rpm/` for Fedora and compatible distributions
+- `appimage/` for an AppImage that works across many distributions
 
 Install locally with:
 
 ```sh
-sudo dpkg -i src-tauri/target/release/bundle/deb/*.deb
-sudo rpm -i src-tauri/target/release/bundle/rpm/*.rpm
+sudo apt install ./src-tauri/target/release/bundle/deb/*.deb
+sudo dnf install ./src-tauri/target/release/bundle/rpm/*.rpm
+chmod +x src-tauri/target/release/bundle/appimage/*.AppImage
+./src-tauri/target/release/bundle/appimage/*.AppImage
 ```
 
+Run the command for your distribution. `apt` and `dnf` install the package's runtime dependencies. An AppImage can require FUSE support on your system; see the [AppImage troubleshooting guide](https://docs.appimage.org/user-guide/troubleshooting/fuse.html).
+
 For widest Linux compatibility, build on an older supported base such as Ubuntu 22.04 or Debian 12 so the resulting binaries do not require a newer glibc than your target systems provide. This follows Tauri's Linux distribution guidance.
+
+## GitHub releases
+
+A `v<version>` tag builds Linux x64 DEB, RPM, and AppImage files, a Windows x64 setup EXE, and DMGs for Intel and Apple Silicon Macs. The release workflow checks package contents, installs the DEB on Ubuntu and the RPM on Fedora, extracts the AppImage on Arch, and creates a draft GitHub release with checksums. Check the installers on real desktops before publishing the draft.
+
+The Windows installer may show a Microsoft SmartScreen warning because it has no code signing certificate. The macOS DMGs use ad hoc signing, so macOS may ask you to approve Handy in Privacy & Security. Follow the [Apple instructions for opening an unverified app](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac). A trusted public release needs an Apple Developer certificate and notarization, and a Windows signing certificate.
+
+For a desktop smoke test on each platform, install Handy, add a project with a long-running command, run it, check stdout and stderr, stop it, quit from the tray, and reopen Handy to check that the project remains saved. On Linux, repeat this with the AppImage on Arch or another non-DEB/non-RPM distribution. If installation fails, capture the package manager output; for an RPM, `rpm -qpR Handy*.rpm` lists its dependencies.
 
 ## Storage and trust
 

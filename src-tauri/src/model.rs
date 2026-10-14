@@ -228,7 +228,7 @@ mod tests {
         let project = Project {
             id: "p".into(),
             name: "Web".into(),
-            base_dir: "/tmp/web".into(),
+            base_dir: std::env::temp_dir().join("web").display().to_string(),
             command_ids: vec!["api".into()],
         };
         let command = HandyCommand {
